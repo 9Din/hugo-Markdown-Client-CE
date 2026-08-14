@@ -12,6 +12,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="180" MinHeight="60"/>
         </Grid.RowDefinitions>
 
         <!-- 工具栏 -->
@@ -158,8 +159,17 @@
             </Border>
         </Grid>
 
+        <!-- 日志区拖拽分隔条 -->
+        <GridSplitter Grid.Row="2"
+                      Height="5"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch"
+                      Background="{DynamicResource BorderBrush}"
+                      ResizeBehavior="PreviousAndNext"
+                      Cursor="SizeNS"/>
+
         <!-- 底部日志 -->
-        <Border Grid.Row="2" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Height="150">
+        <Border Grid.Row="3" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0">
             <DockPanel>
                 <DockPanel DockPanel.Dock="Top" Margin="8,4">
                     <TextBlock x:Name="LogTitle" Text="日志" FontWeight="Bold" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center"/>
