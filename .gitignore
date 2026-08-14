@@ -11,3 +11,7 @@ publish/
 # IDE
 .idea/
 *.swp
+
+# Hugo source bundles (upstream, not part of this project)
+hugo Source code*/
+hugo_source*/

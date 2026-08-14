@@ -23,6 +23,7 @@
 - 启动服务器后自动在默认浏览器打开站点（localhost:1313）
 - **Hugo 已嵌入**：`build.bat` 会自动下载最新版 Hugo（windows-amd64）并放入发布目录，任何电脑无需单独安装 Hugo 或配置 PATH
 - **便携模式**：若 `hugo.exe` 放在程序同目录（或 `vendor/hugo/hugo.exe`），也会自动使用
+- **首次使用自动下载**：若目标电脑未找到 Hugo，应用会询问用户并自动下载 `hugo.exe`（约 50 MB）到程序目录 —— 零安装、零 PATH 配置
 - Git 提交推送（add → commit → push）
 
 ### 📂 文件夹模板

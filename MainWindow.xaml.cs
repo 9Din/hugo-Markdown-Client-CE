@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
+using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -781,8 +783,10 @@ public partial class MainWindow : Window
     }
 
     // ===== Hugo 命令 =====
-    // 获取 Hugo 可执行文件：优先应用同目录内嵌的 hugo，其次 PATH
-    private string FindHugoExecutable()
+    private const string HugoVersion = "0.145.0";
+
+    // 获取 Hugo 可执行文件：优先应用同目录内嵌的 hugo，其次 PATH（实测存在）
+    private string? FindHugoExecutable()
     {
         // 1. 应用所在目录下的 hugo.exe（build.bat 发布时会拷入 publish 目录）
         var appDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -800,24 +804,118 @@ public partial class MainWindow : Window
         if (File.Exists(vendorHugo))
             return vendorHugo;
 
-        // 4. 回退到 PATH 环境变量
-        return "hugo";
+        // 4. PATH 环境变量（「hugo」命令是否存在）
+        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator))
+        {
+            if (string.IsNullOrWhiteSpace(dir)) continue;
+            try
+            {
+                var candidate = Path.Combine(dir.Trim('"'), "hugo.exe");
+                if (File.Exists(candidate))
+                    return candidate;
+            }
+            catch { /* 忽略非法路径 */ }
+        }
+
+        // 未找到
+        return null;
     }
 
-    private void HugoServeBtn_Click(object sender, RoutedEventArgs e)
+    // 若 Hugo 不存在，自动下载 ~50MB 的 hugo.exe 到应用目录（无需用户安装/配置 PATH）
+    private async Task<string?> EnsureHugoExecutableAsync()
+    {
+        var existing = FindHugoExecutable();
+        if (existing != null) return existing;
+
+        var appDir = AppDomain.CurrentDomain.BaseDirectory;
+        var target = Path.Combine(appDir, "hugo.exe");
+
+        // 询问用户是否下载
+        var confirm = MessageBox.Show(
+            _isEnglish
+                ? "Hugo was not found on this computer.\n\n" +
+                  "Download Hugo (~50 MB) automatically to the app folder? " +
+                  "No installation or PATH setup needed."
+                : "未在本机找到 Hugo。\n\n" +
+                  "是否自动下载 Hugo（约 50 MB）到程序目录？无需安装、无需配置 PATH。",
+            _isEnglish ? "Hugo Not Found" : "未找到 Hugo",
+            MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+        if (confirm != MessageBoxResult.Yes)
+        {
+            Log(_isEnglish
+                ? "Hugo download cancelled by user."
+                : "用户取消了 Hugo 自动下载。");
+            return null;
+        }
+
+        var url =
+            $"https://github.com/gohugoio/hugo/releases/download/v{HugoVersion}/hugo_{HugoVersion}_windows-amd64.zip";
+        var tempZip = Path.Combine(appDir, "hugo_download.zip");
+
+        try
+        {
+            Log(_isEnglish
+                ? $"Downloading Hugo v{HugoVersion}..."
+                : $"正在下载 Hugo v{HugoVersion}...");
+            using (var client = new HttpClient())
+            {
+                client.Timeout = TimeSpan.FromMinutes(5);
+                using var response = await client.GetAsync(url);
+                response.EnsureSuccessStatusCode();
+                await using (var fs = File.Create(tempZip))
+                {
+                    await response.Content.CopyToAsync(fs);
+                }
+            }
+
+            Log(_isEnglish ? "Extracting hugo.exe..." : "正在解压 hugo.exe...");
+            using (var zip = ZipFile.Open(tempZip, ZipArchiveMode.Read))
+            {
+                var entry = zip.Entries.FirstOrDefault(e =>
+                    e.FullName.EndsWith("hugo.exe", StringComparison.OrdinalIgnoreCase));
+                if (entry == null)
+                    throw new InvalidOperationException("hugo.exe not found in archive");
+                entry.ExtractToFile(target, overwrite: true);
+            }
+
+            File.Delete(tempZip);
+
+            if (!File.Exists(target))
+                throw new InvalidOperationException("Downloaded hugo.exe is missing");
+
+            Log(_isEnglish
+                ? $"Hugo downloaded to: {target}"
+                : $"Hugo 已下载到：{target}");
+            return target;
+        }
+        catch (Exception ex)
+        {
+            try { if (File.Exists(tempZip)) File.Delete(tempZip); } catch { }
+            Log(_isEnglish
+                ? $"Failed to download Hugo: {ex.Message}"
+                : $"Hugo 下载失败：{ex.Message}");
+            MessageBox.Show(
+                _isEnglish
+                    ? $"Failed to download Hugo:\n{ex.Message}\n\n" +
+                      "Please check your network, or manually place hugo.exe next to Huge.exe."
+                    : $"Hugo 下载失败：\n{ex.Message}\n\n" +
+                      "请检查网络，或手动将 hugo.exe 放到 Huge.exe 同目录下。",
+                _isEnglish ? "Error" : "错误",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            return null;
+        }
+    }
+
+    private async void HugoServeBtn_Click(object sender, RoutedEventArgs e)
     {
         if (_projectPath == null) return;
 
-        // 确定 Hugo 可执行文件（本地嵌入优先，否则回退 PATH）
-        var hugoPath = FindHugoExecutable();
-
-        // 当 hugoPath 为绝对路径时，先校验文件确实存在（提前给出明确错误）
-        if (Path.IsPathRooted(hugoPath) && !File.Exists(hugoPath))
+        // 确定 Hugo 可执行文件；若不存在，自动询问并下载（无需用户安装/配置 PATH）
+        var hugoPath = await EnsureHugoExecutableAsync();
+        if (hugoPath == null)
         {
-            var msg = _isEnglish
-                ? $"Hugo executable not found: {hugoPath}"
-                : $"未找到 Hugo 可执行文件：{hugoPath}";
-            MessageBox.Show(msg, _isEnglish ? "Error" : "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            // 用户取消下载或下载失败
             return;
         }
 

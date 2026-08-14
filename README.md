@@ -23,6 +23,7 @@ A desktop application for Hugo content management, enabling non-technical users 
 - Starting the server automatically opens the live site in your default browser (localhost:1313)
 - **Hugo embedded**: `build.bat` automatically downloads the latest Hugo (windows-amd64) and places `hugo.exe` in the publish folder — no separate Hugo installation or PATH configuration needed on any computer
 - **Portable fallback**: if `hugo.exe` is placed in the same folder as the application (or in `vendor/hugo/hugo.exe`), it is used automatically
+- **Auto-download on first use**: if Hugo is not found on the target computer, the app asks the user and downloads `hugo.exe` (~50 MB) automatically to the app folder — zero installation, zero PATH setup
 - Git commit & push (add → commit → push)
 
 ### 📂 Folder Templates
