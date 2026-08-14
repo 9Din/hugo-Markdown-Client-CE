@@ -303,7 +303,8 @@ public partial class MainWindow : Window
         foreach (var file in Directory.GetFiles(dirPath).OrderBy(f => f))
         {
             var ext = Path.GetExtension(file).ToLower();
-            if (ext is ".md" or ".markdown" or ".yaml" or ".yml" or ".toml" or ".json")
+            if (ext is ".md" or ".markdown" or ".yaml" or ".yml" or ".toml" or ".json"
+                or ".png" or ".jpg" or ".jpeg" or ".gif" or ".webp" or ".svg" or ".bmp" or ".ico")
             {
                 var node = new TreeViewItem
                 {
@@ -333,15 +334,50 @@ public partial class MainWindow : Window
         }
     }
 
+    private static readonly string[] ImageExtensions =
+    {
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico"
+    };
+
+    private bool IsImageFile(string path)
+    {
+        var ext = Path.GetExtension(path).ToLower();
+        return ImageExtensions.Contains(ext);
+    }
+
     private void OpenFile(string path)
     {
         try
         {
             _currentFile = path;
-            EditorBox.Text = File.ReadAllText(path);
+            if (IsImageFile(path))
+            {
+                // 图片文件 → 右侧图片预览
+                var bitmap = new System.Windows.Media.Imaging.BitmapImage();
+                bitmap.BeginInit();
+                bitmap.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                bitmap.UriSource = new Uri(path);
+                bitmap.EndInit();
+                bitmap.Freeze();
+
+                ImagePreview.Source = bitmap;
+                var fi = new FileInfo(path);
+                ImageInfoText.Text = $"{Path.GetFileName(path)}  ·  {bitmap.PixelWidth} × {bitmap.PixelHeight} px  ·  {FormatFileSize(fi.Length)}";
+                ImagePreviewPanel.Visibility = Visibility.Visible;
+                EditorBox.Visibility = Visibility.Collapsed;
+                LineNumberBox.Visibility = Visibility.Collapsed;
+                FormatBar.IsEnabled = false;
+            }
+            else
+            {
+                EditorBox.Text = File.ReadAllText(path);
+                EditorBox.Visibility = Visibility.Visible;
+                LineNumberBox.Visibility = Visibility.Visible;
+                ImagePreviewPanel.Visibility = Visibility.Collapsed;
+                _isDirty = false;
+                FormatBar.IsEnabled = true;
+            }
             EditorTitle.Text = Path.GetFileName(path);
-            _isDirty = false;
-            FormatBar.IsEnabled = true;
             Log($"{(_isEnglish ? "Opened: " : "已打开: ")}{path}");
         }
         catch (Exception ex)
@@ -349,6 +385,13 @@ public partial class MainWindow : Window
             MessageBox.Show($"{( _isEnglish ? "Cannot open file: " : "无法打开文件: ")}{ex.Message}",
                 _isEnglish ? "Error" : "错误", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    private static string FormatFileSize(long bytes)
+    {
+        if (bytes >= 1024 * 1024) return $"{(bytes / 1024.0 / 1024.0):0.0} MB";
+        if (bytes >= 1024) return $"{(bytes / 1024.0):0.0} KB";
+        return $"{bytes} B";
     }
 
     // ===== 编辑器 =====

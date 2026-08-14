@@ -122,19 +122,40 @@
                                  Text="1"/>
                         <!-- 分隔线 -->
                         <Border Grid.Column="0" Width="1" Background="{DynamicResource BorderBrush}" Margin="0,0,0,0" HorizontalAlignment="Right"/>
-                        <!-- 编辑器 -->
-                        <TextBox x:Name="EditorBox"
-                                 Grid.Column="1"
-                                 AcceptsReturn="True"
-                                 AcceptsTab="True"
-                                 VerticalScrollBarVisibility="Auto"
-                                 HorizontalScrollBarVisibility="Auto"
-                                 FontFamily="Consolas"
-                                 FontSize="13"
-                                 TextChanged="EditorBox_TextChanged"
-                                 BorderThickness="0"
-                                 Padding="10"
-                                 SpellCheck.IsEnabled="False"/>
+                        <!-- 编辑器与图片预览切换 -->
+                        <Grid Grid.Column="1">
+                            <TextBox x:Name="EditorBox"
+                                     AcceptsReturn="True"
+                                     AcceptsTab="True"
+                                     VerticalScrollBarVisibility="Auto"
+                                     HorizontalScrollBarVisibility="Auto"
+                                     FontFamily="Consolas"
+                                     FontSize="13"
+                                     TextChanged="EditorBox_TextChanged"
+                                     BorderThickness="0"
+                                     Padding="10"
+                                     SpellCheck.IsEnabled="False"/>
+                            <!-- 图片预览 -->
+                            <Grid x:Name="ImagePreviewPanel" Visibility="Collapsed" Background="{DynamicResource EditorBgBrush}">
+                                <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                              VerticalScrollBarVisibility="Auto"
+                                              HorizontalContentAlignment="Center"
+                                              VerticalContentAlignment="Center">
+                                    <Image x:Name="ImagePreview"
+                                           MaxWidth="1400"
+                                           MaxHeight="1200"
+                                           Stretch="Uniform"
+                                           Margin="20"/>
+                                </ScrollViewer>
+                                <TextBlock x:Name="ImageInfoText"
+                                           Text=""
+                                           Foreground="{DynamicResource MutedTextBrush}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Bottom"
+                                           Margin="0,0,0,8"
+                                           FontSize="12"/>
+                            </Grid>
+                        </Grid>
                     </Grid>
                 </DockPanel>
             </Border>
