@@ -15,3 +15,7 @@ publish/
 # Hugo source bundles (upstream, not part of this project)
 hugo Source code*/
 hugo_source*/
+
+# Hugo executable cache (auto-downloaded by build.bat, not source)
+/hugo.exe
+/hugo_download.zip

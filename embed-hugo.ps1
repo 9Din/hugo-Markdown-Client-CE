@@ -51,6 +51,14 @@ try {
         throw 'hugo.exe not found in downloaded archive'
     }
     Copy-Item $hugoBin.FullName $targetHugo -Force
+    # Cache to project root so the next build reuses it instead of downloading again
+    $cachedHugo = Join-Path $projectRoot 'hugo.exe'
+    try {
+        Copy-Item $hugoBin.FullName $cachedHugo -Force
+        Write-Host "    Cached hugo.exe to project root for reuse"
+    } catch {
+        Write-Host "    [WARN] Could not cache hugo.exe to project root: $($_.Exception.Message)"
+    }
     Write-Host "    Hugo embedded successfully: $targetHugo"
 }
 catch {
