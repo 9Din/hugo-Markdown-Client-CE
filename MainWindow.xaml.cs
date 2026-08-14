@@ -227,6 +227,8 @@ public partial class MainWindow : Window
         _isDirty = false;
         EditorBox.Clear();
         EditorTitle.Text = _isEnglish ? "No file selected" : "未选择文件";
+        EditorTitle.Visibility = Visibility.Visible;
+        ImagePreviewPanel.Visibility = Visibility.Collapsed;
         StatusText.Text = Path.GetFileName(path);
         SetProjectButtons(true);
         BuildFileTree();
@@ -363,6 +365,8 @@ public partial class MainWindow : Window
                 ImagePreview.Source = bitmap;
                 var fi = new FileInfo(path);
                 ImageInfoText.Text = $"{Path.GetFileName(path)}  ·  {bitmap.PixelWidth} × {bitmap.PixelHeight} px  ·  {FormatFileSize(fi.Length)}";
+                // 隐藏顶部标题，避免与左上角信息行重复显示文件名
+                EditorTitle.Visibility = Visibility.Collapsed;
                 ImagePreviewPanel.Visibility = Visibility.Visible;
                 EditorBox.Visibility = Visibility.Collapsed;
                 LineNumberBox.Visibility = Visibility.Collapsed;
@@ -371,6 +375,7 @@ public partial class MainWindow : Window
             else
             {
                 EditorBox.Text = File.ReadAllText(path);
+                EditorTitle.Visibility = Visibility.Visible;
                 EditorBox.Visibility = Visibility.Visible;
                 LineNumberBox.Visibility = Visibility.Visible;
                 ImagePreviewPanel.Visibility = Visibility.Collapsed;
@@ -628,6 +633,8 @@ public partial class MainWindow : Window
                 _currentFile = null;
                 EditorBox.Clear();
                 EditorTitle.Text = _isEnglish ? "No file selected" : "未选择文件";
+                EditorTitle.Visibility = Visibility.Visible;
+                ImagePreviewPanel.Visibility = Visibility.Collapsed;
                 FormatBar.IsEnabled = false;
             }
             BuildFileTree();
