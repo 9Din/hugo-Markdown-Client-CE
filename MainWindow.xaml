@@ -35,7 +35,7 @@
 
                     <Button x:Name="ThemeBtn" Content="🌙" Click="ThemeBtn_Click" DockPanel.Dock="Right" Margin="8,0,8,0" ToolTip="切换主题 / Toggle Theme"/>
                     <Button x:Name="LangBtn" Content="EN" Click="LangBtn_Click" DockPanel.Dock="Right" Margin="0,0,8,0" ToolTip="切换语言 / Switch Language"/>
-                    <TextBlock x:Name="StatusText" Text="未打开项目" VerticalAlignment="Center" Foreground="{DynamicResource MutedTextBrush}" Margin="8,0,0,0" DockPanel.Dock="Right"/>
+                    <TextBlock x:Name="StatusText" Text="未打开项目" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" Margin="8,0,0,0" DockPanel.Dock="Right"/>
                 </DockPanel>
 
                 <!-- Markdown 格式化工具栏 -->

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -57,6 +58,28 @@ public partial class MainWindow : Window
         }
     }
 
+    // Windows 10/11 深色标题栏支持
+    [DllImport("dwmapi.dll", PreserveSig = true)]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+    private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+
+    // 让系统标题栏（顶部 Hugo - Markdown Client 图标区）跟随深色模式
+    private void ApplyTitleBarTheme()
+    {
+        try
+        {
+            var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            if (hwnd == IntPtr.Zero) return;
+            var dark = _isDarkTheme ? 1 : 0;
+            _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
+        }
+        catch
+        {
+            // 旧版 Windows 不支持时静默忽略
+        }
+    }
+
     // ===== 全局主题 =====
     public static bool IsDarkTheme { get; private set; }
 
@@ -86,6 +109,7 @@ public partial class MainWindow : Window
             resources["AccentBrush"] = resources["DarkAccentBrush"];
             ThemeBtn.Content = "☀";
             ThemeBtn.ToolTip = _isEnglish ? "Switch to Light" : "切换到亮色主题";
+            ApplyTitleBarTheme();
         }
         else
         {
@@ -101,6 +125,7 @@ public partial class MainWindow : Window
             resources["AccentBrush"] = new SolidColorBrush(Color.FromRgb(0xC5, 0x64, 0x73));
             ThemeBtn.Content = "🌙";
             ThemeBtn.ToolTip = _isEnglish ? "Switch to Dark" : "切换到暗色主题";
+            ApplyTitleBarTheme();
         }
     }
 
