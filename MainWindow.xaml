@@ -141,7 +141,7 @@
                                          StretchDirection="DownOnly"
                                          HorizontalAlignment="Center"
                                          VerticalAlignment="Center"
-                                         Margin="20">
+                                         Margin="23">
                                     <Image x:Name="ImagePreview" Stretch="None"/>
                                 </Viewbox>
                                 <TextBlock x:Name="ImageInfoText"
