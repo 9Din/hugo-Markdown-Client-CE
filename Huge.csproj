@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Huge</AssemblyName>
+    <RootNamespace>Huge</RootNamespace>
+    <Version>1.0.0</Version>
+    <Authors>Huge</Authors>
+    <Product>Hugo - Markdown Client</Product>
+    <Description>Hugo content management desktop tool</Description>
+    <ApplicationIcon>Assets\huge.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="Assets\huge.ico" />
+  </ItemGroup>
+
+</Project>
