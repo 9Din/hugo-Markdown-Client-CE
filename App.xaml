@@ -160,7 +160,7 @@
             </Setter>
         </Style>
 
-        <!-- 主题化滚动条：基于 WPF 官方 Aero 模板，仅替换配色，保证 Thumb 可正常拖拽 -->
+        <!-- 主题化滚动条：采用 WPF 官方 Aero 模板结构（单个 PART_Track，Trigger 切换布局方向），保证 Thumb 可拖拽且滑块联动 -->
         <Style TargetType="ScrollBar">
             <Setter Property="Background" Value="{DynamicResource PanelBrush}"/>
             <Setter Property="MinWidth" Value="14"/>
@@ -168,40 +168,37 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ScrollBar">
+                        <ControlTemplate.Resources>
+                            <ControlTemplate x:Key="RepeatBtnTemplate" TargetType="RepeatButton">
+                                <Border Background="Transparent"/>
+                            </ControlTemplate>
+                        </ControlTemplate.Resources>
                         <Grid x:Name="Root" Background="{TemplateBinding Background}">
                             <Track x:Name="PART_Track"
-                                   Focusable="False"
+                                   Focusable="false"
                                    Orientation="{TemplateBinding Orientation}"
-                                   IsDirectionReversed="True">
+                                   IsDirectionReversed="true">
                                 <Track.DecreaseRepeatButton>
-                                    <RepeatButton Command="ScrollBar.PageUpCommand"
+                                    <RepeatButton Command="{x:Static ScrollBar.LineUpCommand}"
                                                   Focusable="False"
-                                                  IsTabStop="False">
-                                        <RepeatButton.Template>
-                                            <ControlTemplate TargetType="RepeatButton">
-                                                <Border Background="Transparent"/>
-                                            </ControlTemplate>
-                                        </RepeatButton.Template>
-                                    </RepeatButton>
+                                                  IsTabStop="False"
+                                                  Template="{StaticResource RepeatBtnTemplate}"/>
                                 </Track.DecreaseRepeatButton>
                                 <Track.IncreaseRepeatButton>
-                                    <RepeatButton Command="ScrollBar.PageDownCommand"
+                                    <RepeatButton Command="{x:Static ScrollBar.LineDownCommand}"
                                                   Focusable="False"
-                                                  IsTabStop="False">
-                                        <RepeatButton.Template>
-                                            <ControlTemplate TargetType="RepeatButton">
-                                                <Border Background="Transparent"/>
-                                            </ControlTemplate>
-                                        </RepeatButton.Template>
-                                    </RepeatButton>
+                                                  IsTabStop="False"
+                                                  Template="{StaticResource RepeatBtnTemplate}"/>
                                 </Track.IncreaseRepeatButton>
                                 <Track.Thumb>
-                                    <Thumb IsTabStop="False">
+                                    <Thumb Margin="1,0,1,0"
+                                           Focusable="False"
+                                           IsTabStop="False">
                                         <Thumb.Template>
                                             <ControlTemplate TargetType="Thumb">
                                                 <Border Background="{DynamicResource BorderBrush}"
                                                         CornerRadius="5"
-                                                        Margin="3"/>
+                                                        Margin="1,2,1,2"/>
                                             </ControlTemplate>
                                         </Thumb.Template>
                                     </Thumb>
