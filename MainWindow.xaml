@@ -135,18 +135,15 @@
                                      BorderThickness="0"
                                      Padding="10"
                                      SpellCheck.IsEnabled="False"/>
-                            <!-- 图片预览 -->
+                            <!-- 图片预览：Viewbox + DownOnly = 只缩小不放大，自适应无滚动条 -->
                             <Grid x:Name="ImagePreviewPanel" Visibility="Collapsed" Background="{DynamicResource EditorBgBrush}">
-                                <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                                              VerticalScrollBarVisibility="Auto"
-                                              HorizontalContentAlignment="Center"
-                                              VerticalContentAlignment="Center">
-                                    <Image x:Name="ImagePreview"
-                                           MaxWidth="1400"
-                                           MaxHeight="1200"
-                                           Stretch="Uniform"
-                                           Margin="20"/>
-                                </ScrollViewer>
+                                <Viewbox Stretch="Uniform"
+                                         StretchDirection="DownOnly"
+                                         HorizontalAlignment="Center"
+                                         VerticalAlignment="Center"
+                                         Margin="20">
+                                    <Image x:Name="ImagePreview" Stretch="None"/>
+                                </Viewbox>
                                 <TextBlock x:Name="ImageInfoText"
                                            Text=""
                                            Foreground="{DynamicResource MutedTextBrush}"
