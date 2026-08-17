@@ -7,16 +7,23 @@
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource BgBrush}"
         Foreground="{DynamicResource TextBrush}">
-    <Grid>
+    <Grid x:Name="RootGrid">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="180" MinHeight="60"/>
         </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="300" MinWidth="200"/>
+            <ColumnDefinition Width="5"/>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="5"/>
+            <ColumnDefinition Width="2*" MinWidth="220"/>
+        </Grid.ColumnDefinitions>
 
         <!-- 工具栏 -->
-        <Border Grid.Row="0" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="8">
+        <Border Grid.Row="0" Grid.ColumnSpan="5" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="8">
             <StackPanel>
                 <DockPanel>
                     <Button x:Name="OpenProjectBtn" Content="打开 Hugo 项目" Click="OpenProjectBtn_Click" DockPanel.Dock="Left" Margin="0,0,8,0"/>
@@ -62,7 +69,7 @@
         </Border>
 
         <!-- 主内容区（双栏：文件树 + 编辑器） -->
-        <Grid Grid.Row="1">
+        <Grid Grid.Row="1" Grid.ColumnSpan="3">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="300" MinWidth="200"/>
                 <ColumnDefinition Width="5"/>
@@ -72,13 +79,13 @@
             <!-- 左侧文件树 -->
             <Border Grid.Column="0" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0">
                 <DockPanel>
-                    <TextBlock x:Name="ContentTitle" DockPanel.Dock="Top" Text="内容" FontWeight="Bold" Padding="10,8" Foreground="{DynamicResource MutedTextBrush}"/>
+                    <DockPanel DockPanel.Dock="Top" LastChildFill="False">
+                        <TextBlock x:Name="ContentTitle" Text="内容" FontWeight="Bold" Padding="10,8" Foreground="{DynamicResource MutedTextBrush}" DockPanel.Dock="Left"/>
+                        <Button x:Name="RefreshTreeBtn" Content="⟳" Click="RefreshTreeBtn_Click"
+                                DockPanel.Dock="Right" Padding="5,2" Margin="0,4,8,4"
+                                FontSize="11" ToolTip="刷新文件树 / Refresh File Tree" ToolTipService.ShowOnDisabled="True"/>
+                    </DockPanel>
                     <TreeView x:Name="FileTree" SelectedItemChanged="FileTree_SelectedItemChanged" Margin="0,0,0,0">
-                        <TreeView.ItemContainerStyle>
-                            <Style TargetType="TreeViewItem">
-                                <Setter Property="IsExpanded" Value="True"/>
-                            </Style>
-                        </TreeView.ItemContainerStyle>
                         <TreeView.ContextMenu>
                             <ContextMenu>
                                 <MenuItem x:Name="CtxNewFile" Header="新建文件" Click="CtxNewFile_Click"/>
@@ -87,6 +94,8 @@
                                 <MenuItem x:Name="CtxDelete" Header="删除" Click="CtxDelete_Click"/>
                                 <Separator/>
                                 <MenuItem x:Name="CtxNewTemplate" Header="新建模板" Click="CtxNewTemplate_Click"/>
+                                <Separator/>
+                                <MenuItem x:Name="CtxShowInExplorer" Header="在文件资源管理器显示" Click="CtxShowInExplorer_Click"/>
                             </ContextMenu>
                         </TreeView.ContextMenu>
                     </TreeView>
@@ -99,7 +108,35 @@
             <!-- 右侧编辑器 -->
             <Border Grid.Column="2" Background="{DynamicResource EditorBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,0">
                 <DockPanel>
-                    <TextBlock x:Name="EditorTitle" DockPanel.Dock="Top" Text="未选择文件" FontWeight="Bold" Padding="10,8" Foreground="{DynamicResource MutedTextBrush}"/>
+                    <!-- 顶部标题栏：含 AI 展开按钮（折叠后显示在编辑器右上角） -->
+                    <DockPanel DockPanel.Dock="Top" LastChildFill="False">
+                        <TextBlock x:Name="EditorTitle" Text="未选择文件" FontWeight="Bold" Padding="10,8" Foreground="{DynamicResource MutedTextBrush}" DockPanel.Dock="Left"/>
+                        <Button x:Name="AiExpandBtn"
+                                Content="AI"
+                                Click="AiExpandBtn_Click"
+                                Visibility="Collapsed"
+                                DockPanel.Dock="Right"
+                                Width="26" Height="26"
+                                Margin="0,5,8,3"
+                                Padding="0"
+                                ToolTip="展开 AI 助手">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="BtnBorder" CornerRadius="6" Background="{DynamicResource BorderBrush}">
+                                        <TextBlock Text="AI" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="BtnBorder" Property="Background" Value="{DynamicResource AccentBrush}"/>
+                                        </Trigger>
+                                        <Trigger Property="IsPressed" Value="True">
+                                            <Setter TargetName="BtnBorder" Property="Opacity" Value="0.7"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                    </DockPanel>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
@@ -161,6 +198,7 @@
 
         <!-- 日志区拖拽分隔条 -->
         <GridSplitter Grid.Row="2"
+                      Grid.ColumnSpan="3"
                       Height="5"
                       HorizontalAlignment="Stretch"
                       VerticalAlignment="Stretch"
@@ -169,7 +207,7 @@
                       Cursor="SizeNS"/>
 
         <!-- 底部日志 -->
-        <Border Grid.Row="3" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0">
+        <Border Grid.Row="3" Grid.ColumnSpan="3" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0">
             <DockPanel>
                 <DockPanel DockPanel.Dock="Top" Margin="8,4">
                     <TextBlock x:Name="LogTitle" Text="日志" FontWeight="Bold" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center"/>
@@ -187,5 +225,95 @@
                          Padding="8,0"/>
             </DockPanel>
         </Border>
+
+        <!-- AI 分隔条（可拖拽调整 AI 面板宽度，拖完换算回比例以保持窗口自适应） -->
+        <GridSplitter x:Name="AiSplitter" Grid.Column="3" Grid.Row="1" Grid.RowSpan="3"
+                      Width="5"
+                      HorizontalAlignment="Stretch"
+                      Background="{DynamicResource BorderBrush}"
+                      ResizeBehavior="PreviousAndNext"
+                      Cursor="SizeWE"
+                      DragCompleted="AiSplitter_DragCompleted"/>
+
+        <!-- ================= AI 助手面板（仿 Cline 排布） =================
+             Cline 布局：
+             1. Header：图标 + 标题（Cline） + 右侧操作（设置/新会话/历史）
+             2. 消息区：User 右侧紧凑气泡；Assistant 全宽 Markdown 文本 + 顶部小字标注
+             3. Footer：自适应输入框 + 快捷键提示行
+        -->
+        <Border x:Name="AiPanel"
+                Grid.Column="4" Grid.Row="1" Grid.RowSpan="3"
+                MinWidth="220"
+                Background="{DynamicResource PanelBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="1,0,0,0">
+            <DockPanel>
+                <!-- ===== Header（仿 Cline：标题 + 右侧操作按钮） ===== -->
+                <DockPanel DockPanel.Dock="Top" Margin="10,8,8,6" LastChildFill="False">
+                    <!-- 标题 -->
+                    <TextBlock x:Name="AiTitleText" Text="AI Assistant"
+                               FontWeight="Bold" FontSize="13"
+                               Foreground="{DynamicResource TextBrush}"
+                               VerticalAlignment="Center"
+                               Margin="8,0,0,0" DockPanel.Dock="Left"/>
+                    <!-- 右侧操作：折叠 / 清空 / 设置 -->
+                    <Button x:Name="AiCollapseBtn" Content="❮" Click="AiCollapseBtn_Click"
+                            DockPanel.Dock="Right" Padding="4,1" FontSize="11" ToolTip="折叠 AI 助手"/>
+                    <Button x:Name="AiClearBtn" Content="🗑" Click="AiClearBtn_Click"
+                            DockPanel.Dock="Right" Padding="4,1" FontSize="11" Margin="0,0,6,0"
+                            ToolTip="清空对话（新建会话）"/>
+                    <Button x:Name="AiSettingsBtn" Content="⚙" Click="AiSettingsBtn_Click"
+                            DockPanel.Dock="Right" Padding="4,1" FontSize="12" Margin="0,0,6,0"
+                            ToolTip="API 设置"/>
+                </DockPanel>
+
+                <!-- 快捷指令：置于输入区上方（聊天对话底部） -->
+                <WrapPanel DockPanel.Dock="Bottom" Margin="10,0,10,4">
+                    <Button x:Name="AiAnalyzeFileBtn" Content="分析当前文件" Click="AiAnalyzeFileBtn_Click"
+                            Style="{StaticResource FormatBtnStyle}" ToolTip="将当前文件发送给 AI 分析"/>
+                    <Button x:Name="AiAnalyzeProjectBtn" Content="分析项目结构" Click="AiAnalyzeProjectBtn_Click"
+                            Style="{StaticResource FormatBtnStyle}" ToolTip="将项目目录结构发送给 AI 分析"/>
+                </WrapPanel>
+
+                <!-- ===== Footer：输入区 + 提示行（仿 Cline） ===== -->
+                <DockPanel DockPanel.Dock="Bottom" Margin="10,2,10,8">
+                    <DockPanel DockPanel.Dock="Bottom" Margin="2,3,2,0">
+                        <TextBlock x:Name="AiHintText"
+                                   Text="Enter 发送  ·  Shift+Enter 换行"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   HorizontalAlignment="Left"/>
+                        <TextBlock x:Name="AiModelText"
+                                   Text="deepseek-chat"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   HorizontalAlignment="Right"
+                                   DockPanel.Dock="Right"/>
+                    </DockPanel>
+                    <DockPanel>
+                        <Button x:Name="AiSendBtn" Content="发送" Click="AiSendBtn_Click"
+                                DockPanel.Dock="Right" Padding="12,8" Margin="6,0,0,0" Width="64"/>
+                        <Button x:Name="AiStopBtn" Content="■" Click="AiStopBtn_Click"
+                                DockPanel.Dock="Right" Padding="10,8" Margin="0,0,0,0" Width="36"
+                                Visibility="Collapsed" ToolTip="停止生成"/>
+                        <TextBox x:Name="AiInputBox"
+                                 MinHeight="48" MaxHeight="120"
+                                 TextWrapping="Wrap"
+                                 AcceptsReturn="True"
+                                 VerticalScrollBarVisibility="Auto"
+                                 FontFamily="Consolas" FontSize="12" Padding="8,6"
+                                 PreviewKeyDown="AiInputBox_KeyDown"
+                                 TextChanged="AiInputBox_TextChanged"
+                                 ToolTip="Enter 发送 / Shift+Enter 换行"/>
+                    </DockPanel>
+                </DockPanel>
+
+                <!-- 消息区（ScrollViewer 填充，作为 DockPanel 最后一个子元素才能占满剩余空间） -->
+                <ScrollViewer x:Name="AiScroll" VerticalScrollBarVisibility="Auto" Margin="0,2,0,0">
+                    <StackPanel x:Name="AiChatPanel" Margin="12,0,12,10"/>
+                </ScrollViewer>
+            </DockPanel>
+        </Border>
+
     </Grid>
 </Window>

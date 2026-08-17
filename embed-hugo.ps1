@@ -33,9 +33,10 @@ if (Test-Path $targetHugo) {
     exit 0
 }
 
-# 4. Otherwise download latest stable Hugo (windows-amd64) from GitHub
-$version = '0.145.0'
-$url     = "https://github.com/gohugoio/hugo/releases/download/v$version/hugo_${version}_windows-amd64.zip"
+# 4. Otherwise download latest stable Hugo extended (windows-amd64) from GitHub
+# Extended 版支持 SCSS/SASS（现代主题如 hugo-theme-stack 要求 Min 0.157.0 extended）
+$version = '0.157.0'
+$url     = "https://github.com/gohugoio/hugo/releases/download/v$version/hugo_extended_${version}_windows-amd64.zip"
 $tempBase = (Get-Item $env:TEMP).FullName
 $zip     = Join-Path $tempBase 'hugo_download.zip'
 $extract = Join-Path $tempBase ('hugo_extract_' + [guid]::NewGuid().ToString('N'))

@@ -3,8 +3,11 @@ using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using Microsoft.Win32;
@@ -20,6 +23,17 @@ public partial class MainWindow : Window
     private bool _isDarkTheme;
     private Process? _hugoProcess;
 
+    // ===== AI 助手 =====
+    private readonly ApiSettings _apiSettings = ApiSettings.Load();
+    private readonly List<DeepSeekClient.ChatMessage> _aiHistory = new();
+    private CancellationTokenSource? _aiCts;
+    // Cline 式流式气泡状态
+    private TextBlock? _aiStreamTextBlock;   // 流式期间的纯文本宿主
+    private TextBlock? _aiStreamStatus;      // 流式期间状态行（「ASSISTANT · 正在思考…」）
+    private string? _aiStreamPlain;          // 流式累计纯文本
+    private string? _lastUserText;           // 最近一次提问（用于重新生成）
+    private string? _lastAssistantText;      // 最近一次回复（用于复制/插入）
+
     public MainWindow()
     {
         InitializeComponent();
@@ -32,6 +46,23 @@ public partial class MainWindow : Window
         // 通过路由事件挂接编辑器的滚动事件（TextBox 无 ScrollChanged 事件）
         EditorBox.AddHandler(ScrollViewer.ScrollChangedEvent,
             new ScrollChangedEventHandler(EditorBox_ScrollChanged));
+
+        // Ctrl+S 快速保存（全局快捷键，编辑器内生效）
+        PreviewKeyDown += (s, e) =>
+        {
+            if (e.Key == Key.S && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+            {
+                SaveCurrentFile();
+                e.Handled = true;
+            }
+        };
+
+        // AI 面板尺寸变化 → 重排消息，使其跟随面板宽度自适应
+        AiChatPanel.SizeChanged += AiChatPanel_SizeChanged;
+
+        // AI 助手欢迎语（后续按语言切换）
+        AddAiBubble("assistant",
+            "你好，我是 AI 助手。我可以分析当前文件、梳理项目结构、协助翻译镜像文章，或回答你的任何问题。请点击右上角 ⚙ 配置 DeepSeek API。");
     }
 
     // 获取 Windows 系统当前是否为深色模式
@@ -127,6 +158,123 @@ public partial class MainWindow : Window
             ThemeBtn.ToolTip = _isEnglish ? "Switch to Dark" : "切换到暗色主题";
             ApplyTitleBarTheme();
         }
+
+        // 同步 AI 面板中已渲染消息的文字颜色
+        RefreshAiThemeColors();
+    }
+
+    // 递归更新 FlowDocument 中所有 Block/Inline 的颜色（含代码块、表格等子级）
+    private static void UpdateFlowDocumentColors(FlowDocument doc, Brush textBrush, Brush mutedBrush)
+    {
+        doc.Foreground = textBrush;
+        foreach (var block in doc.Blocks)
+        {
+            UpdateBlockColors(block, textBrush, mutedBrush);
+        }
+    }
+
+    private static void UpdateBlockColors(Block block, Brush textBrush, Brush mutedBrush)
+    {
+        if (block is Paragraph p)
+        {
+            p.Foreground = textBrush;
+            foreach (var inline in p.Inlines)
+            {
+                if (inline is Run run)
+                {
+                    run.Foreground = textBrush;
+                }
+                else if (inline is Hyperlink link)
+                {
+                    link.Foreground = textBrush;
+                    link.TextDecorations = null;
+                }
+            }
+        }
+        else if (block is Section section)
+        {
+            foreach (var child in section.Blocks)
+            {
+                UpdateBlockColors(child, textBrush, mutedBrush);
+            }
+        }
+        else if (block is BlockUIContainer container)
+        {
+            // 代码块/表格内的 TextBox/TextBlock
+            if (container.Child is System.Windows.Controls.TextBox codeBox)
+            {
+                codeBox.Foreground = textBrush;
+            }
+            else if (container.Child is System.Windows.Controls.Grid grid)
+            {
+                foreach (var cell in grid.Children.OfType<System.Windows.Controls.TextBlock>())
+                {
+                    cell.Foreground = textBrush;
+                }
+            }
+        }
+        else if (block is List list)
+        {
+            foreach (var item in list.ListItems)
+            {
+                foreach (var childBlock in item.Blocks)
+                {
+                    UpdateBlockColors(childBlock, textBrush, mutedBrush);
+                }
+            }
+        }
+        else if (block is Table table)
+        {
+            foreach (var row in table.RowGroups.SelectMany(rg => rg.Rows))
+            {
+                foreach (var cell in row.Cells)
+                {
+                    foreach (var childBlock in cell.Blocks)
+                    {
+                        UpdateBlockColors(childBlock, textBrush, mutedBrush);
+                    }
+                }
+            }
+        }
+    }
+
+    // 主题切换后刷新 AI 面板中已渲染消息的文字颜色
+    private void RefreshAiThemeColors()
+    {
+        var textBrush = new SolidColorBrush(IsDarkTheme
+            ? Color.FromRgb(0xD4, 0xD4, 0xD4)
+            : Color.FromRgb(0x24, 0x23, 0x1F));
+        var mutedBrush = new SolidColorBrush(IsDarkTheme
+            ? Color.FromRgb(0x9D, 0x9D, 0x9D)
+            : Color.FromRgb(0x78, 0x76, 0x70));
+
+        foreach (var child in AiChatPanel.Children)
+        {
+            // 助手消息：StackPanel[标注行(TextBlock) + 内容(FlowDocumentScrollViewer/TextBlock) + 操作栏]
+            if (child is StackPanel sp)
+            {
+                foreach (var item in sp.Children)
+                {
+                    if (item is TextBlock label && label != _aiStreamTextBlock && label != _aiStreamStatus)
+                    {
+                        label.Foreground = mutedBrush;
+                    }
+                    else if (item is FlowDocumentScrollViewer fv && fv.Document != null)
+                    {
+                        UpdateFlowDocumentColors(fv.Document, textBrush, mutedBrush);
+                    }
+                    else if (item is TextBlock contentTb)
+                    {
+                        contentTb.Foreground = textBrush;
+                    }
+                }
+            }
+            // 用户消息：Border[TextBlock] 白色文字不变
+        }
+
+        // 刷新流式状态行/内容颜色
+        if (_aiStreamStatus != null) _aiStreamStatus.Foreground = mutedBrush;
+        if (_aiStreamTextBlock != null) _aiStreamTextBlock.Foreground = textBrush;
     }
 
     // ===== 语言切换 =====
@@ -187,10 +335,29 @@ public partial class MainWindow : Window
         CtxDelete.Header = _isEnglish ? "Delete" : "删除";
         CtxNewTemplate.Header = _isEnglish ? "New Template" : "新建模板";
 
+        // 内容区标题/刷新
+        RefreshTreeBtn.ToolTip = _isEnglish ? "Refresh File Tree" : "刷新文件树";
+        CtxShowInExplorer.Header = _isEnglish ? "Show in File Explorer" : "在文件资源管理器显示";
+
         // 主题提示
         ThemeBtn.ToolTip = _isDarkTheme
             ? (_isEnglish ? "Switch to Light" : "切换到亮色主题")
             : (_isEnglish ? "Switch to Dark" : "切换到暗色主题");
+
+        // AI 助手
+        AiTitleText.Text = _isEnglish ? "AI Assistant" : "AI 助手";
+        AiSettingsBtn.ToolTip = _isEnglish ? "API Settings" : "API 设置";
+        AiCollapseBtn.ToolTip = _isEnglish ? "Collapse AI Assistant" : "折叠 AI 助手";
+        AiExpandBtn.ToolTip = _isEnglish ? "Expand AI Assistant" : "展开 AI 助手";
+        AiAnalyzeFileBtn.Content = _isEnglish ? "Analyze File" : "分析当前文件";
+        AiAnalyzeProjectBtn.Content = _isEnglish ? "Analyze Project" : "分析项目结构";
+        AiAnalyzeFileBtn.ToolTip = _isEnglish ? "Send current file to AI" : "将当前文件发送给 AI 分析";
+        AiAnalyzeProjectBtn.ToolTip = _isEnglish ? "Send project structure to AI" : "将项目目录结构发送给 AI 分析";
+        AiSendBtn.Content = _isEnglish ? "Send" : "发送";
+        AiStopBtn.ToolTip = _isEnglish ? "Stop" : "停止生成";
+        AiClearBtn.ToolTip = _isEnglish ? "Clear Conversation" : "清空对话";
+        AiHintText.Text = _isEnglish ? "Enter to send  ·  Shift+Enter for newline" : "Enter 发送  ·  Shift+Enter 换行";
+        AiModelText.Text = _apiSettings.Model;
     }
 
     // ===== 文件树节点 =====
@@ -206,6 +373,29 @@ public partial class MainWindow : Window
         Dispatcher.Invoke(() =>
         {
             LogBox.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}");
+            LogBox.ScrollToEnd();
+        });
+    }
+
+    // 下载进度日志：进度更新时复用最后一行（带 [Hugo] 前缀），避免日志无限刷屏
+    private void LogDownloadProgress(string text)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            const string marker = "[Hugo] ";
+            var lines = LogBox.Text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            if (lines.Length > 0 && lines[^1].TrimStart().StartsWith(marker, StringComparison.Ordinal))
+            {
+                // 替换最后一行，保留时间戳前缀风格
+                var idx = lines[^1].IndexOf(']');
+                var prefix = idx >= 0 ? lines[^1][..(idx + 1)] : "";
+                lines[^1] = $"{prefix} {marker}{text}";
+                LogBox.Text = string.Join(Environment.NewLine, lines);
+            }
+            else
+            {
+                LogBox.AppendText($"[{DateTime.Now:HH:mm:ss}] {marker}{text}");
+            }
             LogBox.ScrollToEnd();
         });
     }
@@ -265,12 +455,13 @@ public partial class MainWindow : Window
         var root = new TreeViewItem
         {
             Header = Path.GetFileName(_projectPath),
-            Tag = new FileNode { FullPath = _projectPath, IsDirectory = true }
+            Tag = new FileNode { FullPath = _projectPath, IsDirectory = true },
+            // 默认折叠文件树，用户点击后展开
+            IsExpanded = false
         };
-        root.IsExpanded = true;
         FileTree.Items.Add(root);
 
-        // 只遍历这三个核心目录，且它们必须存在
+        // 只遍历这三个核心目录，且它们必须存在（全部默认折叠）
         foreach (var dirName in coreDirs)
         {
             var dirPath = Path.Combine(_projectPath, dirName);
@@ -279,7 +470,8 @@ public partial class MainWindow : Window
             var dirNode = new TreeViewItem
             {
                 Header = dirName,
-                Tag = new FileNode { FullPath = dirPath, IsDirectory = true }
+                Tag = new FileNode { FullPath = dirPath, IsDirectory = true },
+                IsExpanded = false
             };
             root.Items.Add(dirNode);
             AddDirectory(dirNode, dirPath, hiddenDirs);
@@ -296,7 +488,8 @@ public partial class MainWindow : Window
             var node = new TreeViewItem
             {
                 Header = name,
-                Tag = new FileNode { FullPath = dir, IsDirectory = true }
+                Tag = new FileNode { FullPath = dir, IsDirectory = true },
+                IsExpanded = false
             };
             parent.Items.Add(node);
             AddDirectory(node, dir, hiddenDirs);
@@ -858,7 +1051,8 @@ public partial class MainWindow : Window
     }
 
     // ===== Hugo 命令 =====
-    private const string HugoVersion = "0.145.0";
+    // 版本需支持常见主题（如 hugo-theme-stack 要求 Min 0.157.0 extended）
+    private const string HugoVersion = "0.157.0";
 
     // 获取 Hugo 可执行文件：优先应用同目录内嵌的 hugo，其次 PATH（实测存在）
     private string? FindHugoExecutable()
@@ -924,23 +1118,56 @@ public partial class MainWindow : Window
             return null;
         }
 
+        // extended 版：支持 SCSS/SASS 编译（现代 Hugo 主题普遍要求）
         var url =
-            $"https://github.com/gohugoio/hugo/releases/download/v{HugoVersion}/hugo_{HugoVersion}_windows-amd64.zip";
+            $"https://github.com/gohugoio/hugo/releases/download/v{HugoVersion}/hugo_extended_{HugoVersion}_windows-amd64.zip";
         var tempZip = Path.Combine(appDir, "hugo_download.zip");
 
         try
         {
             Log(_isEnglish
-                ? $"Downloading Hugo v{HugoVersion}..."
-                : $"正在下载 Hugo v{HugoVersion}...");
+                ? $"Downloading Hugo v{HugoVersion} extended ... 0%"
+                : $"正在下载 Hugo v{HugoVersion} extended ... 0%");
+
             using (var client = new HttpClient())
             {
-                client.Timeout = TimeSpan.FromMinutes(5);
-                using var response = await client.GetAsync(url);
+                client.Timeout = TimeSpan.FromMinutes(10);
+                using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
                 response.EnsureSuccessStatusCode();
-                await using (var fs = File.Create(tempZip))
+
+                var totalBytes = response.Content.Headers.ContentLength ?? 0;
+                var lastPercent = -1;
+                var lastUpdate = DateTime.MinValue;
+
+                await using var source = await response.Content.ReadAsStreamAsync();
+                await using var fs = File.Create(tempZip);
+                var buffer = new byte[81920];
+                long downloaded = 0;
+
+                while (true)
                 {
-                    await response.Content.CopyToAsync(fs);
+                    var read = await source.ReadAsync(buffer, System.Threading.CancellationToken.None);
+                    if (read == 0) break;
+                    await fs.WriteAsync(buffer.AsMemory(0, read));
+                    downloaded += read;
+
+                    // 每 250ms 或进度变化时更新日志（复用同一行，避免刷屏）
+                    var now = DateTime.Now;
+                    var percent = totalBytes > 0 ? (int)(downloaded * 100 / totalBytes) : -1;
+                    if (percent != lastPercent || now - lastUpdate > TimeSpan.FromMilliseconds(250))
+                    {
+                        lastPercent = percent;
+                        lastUpdate = now;
+                        var mb = downloaded / 1024.0 / 1024.0;
+                        var totalMb = totalBytes / 1024.0 / 1024.0;
+                        LogDownloadProgress(_isEnglish
+                            ? (totalBytes > 0
+                                ? $"Downloading Hugo v{HugoVersion} extended ... {percent}% ({mb:0.0} MB / {totalMb:0.0} MB)"
+                                : $"Downloading Hugo v{HugoVersion} extended ... {mb:0.0} MB")
+                            : (totalBytes > 0
+                                ? $"正在下载 Hugo v{HugoVersion} extended ... {percent}% ({mb:0.0} MB / {totalMb:0.0} MB)"
+                                : $"正在下载 Hugo v{HugoVersion} extended ... {mb:0.0} MB"));
+                    }
                 }
             }
 
@@ -1278,6 +1505,48 @@ public partial class MainWindow : Window
         return IsLanguageDir(first) ? first : null;
     }
 
+    // 刷新文件树（供导入的新文件刷新显示）
+    private void RefreshTreeBtn_Click(object sender, RoutedEventArgs e)
+    {
+        if (_projectPath == null)
+        {
+            Log(_isEnglish ? "No project opened." : "未打开项目。");
+            return;
+        }
+        BuildFileTree();
+        Log(_isEnglish ? "File tree refreshed." : "文件树已刷新。");
+    }
+
+    // 在文件资源管理器中显示所选文件/文件夹
+    private void CtxShowInExplorer_Click(object sender, RoutedEventArgs e)
+    {
+        var path = GetSelectedPath();
+        if (path == null)
+        {
+            MessageBox.Show(_isEnglish ? "Please select a file or folder first." : "请先选择一个文件或文件夹。",
+                _isEnglish ? "Notice" : "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true });
+            }
+            else if (File.Exists(path))
+            {
+                // 打开文件所在目录并选中文件
+                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"{(_isEnglish ? "Failed to open explorer: " : "无法打开资源管理器: ")}{ex.Message}",
+                _isEnglish ? "Error" : "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     private void ClearLogBtn_Click(object sender, RoutedEventArgs e) => LogBox.Clear();
 
     // ===== 关闭时清理 =====
@@ -1323,6 +1592,783 @@ public partial class MainWindow : Window
         okBtn.Click += (s, e) => { window.DialogResult = true; window.Close(); };
         textBox.KeyDown += (s, e) => { if (e.Key == Key.Enter) { window.DialogResult = true; window.Close(); } };
         return window.ShowDialog() == true ? textBox.Text : null;
+    }
+
+    // ===== AI 助手 =====
+    private void AiSettingsBtn_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new ApiSettingsDialog(_apiSettings) { Owner = this };
+        dialog.ShowDialog();
+    }
+
+    // 折叠/展开：完全隐藏 AI 面板 + 其左侧分隔条（第3、4列）。
+    // 关键：ColumnDefinition 的 MinWidth=220 会强制保留至少 220px，
+    // 只把 Width 设 0 无法隐藏——正是“残留窗口”的根因，必须先清除该约束。
+    private void AiCollapseBtn_Click(object sender, RoutedEventArgs e)
+    {
+        var splitterCol = RootGrid.ColumnDefinitions[3];
+        var aiCol = RootGrid.ColumnDefinitions[4];
+        // 清除列最小/最大约束，否则 MinWidth=220 留下 220px 空白区
+        aiCol.MinWidth = 0;
+        aiCol.MaxWidth = double.PositiveInfinity;
+        splitterCol.Width = new GridLength(0);
+        aiCol.Width = new GridLength(0);
+        AiSplitter.Visibility = Visibility.Collapsed;
+        AiPanel.Visibility = Visibility.Collapsed;
+        AiExpandBtn.Visibility = Visibility.Visible;
+    }
+
+    private void AiExpandBtn_Click(object sender, RoutedEventArgs e)
+    {
+        var splitterCol = RootGrid.ColumnDefinitions[3];
+        var aiCol = RootGrid.ColumnDefinitions[4];
+        // 恢复最小约束，并用 2* 比例宽度 → 随窗口缩放自适应
+        aiCol.MinWidth = 220;
+        splitterCol.Width = new GridLength(5);
+        aiCol.Width = new GridLength(2, GridUnitType.Star);
+        AiSplitter.Visibility = Visibility.Visible;
+        AiPanel.Visibility = Visibility.Visible;
+        AiExpandBtn.Visibility = Visibility.Collapsed;
+    }
+
+    // GridSplitter 拖拽完成后：把 AI 面板列换算为与编辑区的相对比例（star），
+    // 这样拖拽后窗口缩放仍能保持比例自适应，而非固定像素
+    private void AiSplitter_DragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+    {
+        var editorCol = RootGrid.ColumnDefinitions[2];
+        var aiCol = RootGrid.ColumnDefinitions[4];
+
+        if (editorCol.ActualWidth > 0 && aiCol.ActualWidth > 0)
+        {
+            // 以编辑区为基础 1*，AI 按实际宽度换算（夹在合理区间内）
+            var ratio = Math.Clamp(aiCol.ActualWidth / editorCol.ActualWidth, 0.15, 1.0);
+            editorCol.Width = new GridLength(1, GridUnitType.Star);
+            aiCol.Width = new GridLength(ratio, GridUnitType.Star);
+        }
+    }
+
+    // ===== Cline 式消息渲染 =====
+    // User：右侧紧凑气泡（紫色底 + 白字），无多余标注
+    // Assistant：左侧起全宽 Markdown 文本，顶部小字标注「ASSISTANT · 模型名·时间」，
+    //            底部操作栏（复制 / 插入编辑器 / 重新生成）
+
+    private void AddAiBubble(string role, string text, bool renderMarkdown = false)
+    {
+        if (role == "user")
+        {
+            AddUserBubble(text);
+        }
+        else
+        {
+            AddAssistantBubble(text, renderMarkdown);
+        }
+    }
+
+    // User 消息：右侧紧凑气泡
+    private void AddUserBubble(string text)
+    {
+        var bubble = new Border
+        {
+            CornerRadius = new CornerRadius(8, 8, 2, 8),
+            Padding = new Thickness(10, 7, 10, 7),
+            MaxWidth = Math.Max(150, AiChatPanel.ActualWidth - 60),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 4, 0, 6),
+            Background = new SolidColorBrush(Color.FromRgb(0xC5, 0x64, 0x73)),
+            Child = new TextBlock
+            {
+                Text = text,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = Brushes.White,
+                FontSize = 12.5,
+                LineHeight = 18,
+                FontFamily = new FontFamily("Segoe UI, Segoe UI Emoji, Microsoft YaHei UI")
+            }
+        };
+        AiChatPanel.Children.Add(bubble);
+        ScrollAiToEnd();
+    }
+
+    // Assistant 消息：全宽 Markdown + 标注行 + 操作栏（仿 Cline）
+    private void AddAssistantBubble(string text, bool renderMarkdown)
+    {
+        var outer = new StackPanel { Margin = new Thickness(0, 4, 0, 8) };
+
+        // 标注行（小字：ASSISTANT · 模型 · 时间）
+        var label = new TextBlock
+        {
+            Text = $"ASSISTANT · {_apiSettings.Model} · {DateTime.Now:HH:mm}",
+            FontSize = 10,
+            Foreground = new SolidColorBrush(IsDarkTheme
+                ? Color.FromRgb(0x9D, 0x9D, 0x9D)
+                : Color.FromRgb(0x78, 0x76, 0x70)),
+            Margin = new Thickness(0, 0, 0, 4)
+        };
+        outer.Children.Add(label);
+
+        // 内容
+        if (renderMarkdown && !string.IsNullOrEmpty(text))
+        {
+            var host = new FlowDocumentScrollViewer
+            {
+                Document = MarkdownRenderer.Render(text, Math.Max(180, AiChatPanel.ActualWidth)),
+                BorderThickness = new Thickness(0),
+                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                IsToolBarVisible = false
+            };
+            // FlowDocumentScrollViewer 即使禁用滚动条也会拦截鼠标滚轮，
+            // 导致悬停其上时外层 AiScroll 无法滚动。这里把滚轮事件转发给 AiScroll。
+            host.PreviewMouseWheel += (s, e) =>
+            {
+                var scroll = AiScroll;
+                if (scroll == null) return;
+                var delta = e.Delta;
+                if (delta < 0) scroll.ScrollToVerticalOffset(scroll.VerticalOffset + 40);
+                else scroll.ScrollToVerticalOffset(scroll.VerticalOffset - 40);
+                e.Handled = true;
+            };
+            outer.Children.Add(host);
+        }
+        else
+        {
+            outer.Children.Add(new TextBlock
+            {
+                Text = text,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = new SolidColorBrush(IsDarkTheme
+                    ? Color.FromRgb(0xD4, 0xD4, 0xD4)
+                    : Color.FromRgb(0x24, 0x23, 0x1F)),
+                FontSize = 12.5,
+                LineHeight = 18,
+                FontFamily = new FontFamily("Segoe UI, Segoe UI Emoji, Microsoft YaHei UI")
+            });
+        }
+
+        // 操作栏
+        if (renderMarkdown && !string.IsNullOrEmpty(text))
+        {
+            var actionBar = new DockPanel { Margin = new Thickness(0, 4, 0, 0), LastChildFill = false };
+            var copyBtn = CreateActionButton("⧉ 复制", _isEnglish ? "Copy" : "复制");
+            copyBtn.Click += (s, e) => CopyAiReply(text);
+            DockPanel.SetDock(copyBtn, Dock.Left);
+            actionBar.Children.Add(copyBtn);
+
+            var insertBtn = CreateActionButton("⤓ 插入编辑器", _isEnglish ? "Insert to Editor" : "插入编辑器");
+            insertBtn.Click += (s, e) => InsertAiReplyToEditor(text);
+            DockPanel.SetDock(insertBtn, Dock.Left);
+            actionBar.Children.Add(insertBtn);
+
+            // 方形圆角 ↻ 按钮：置于"插入编辑器"右侧，紧凑样式
+            var regenBtn = CreateActionButton("↻", _isEnglish ? "Regenerate" : "重新生成");
+            regenBtn.Click += async (s, e) => await RegenerateAiReplyAsync();
+            regenBtn.Width = 24;
+            regenBtn.Height = 22;
+            regenBtn.Padding = new Thickness(0);
+            regenBtn.FontSize = 11;
+            DockPanel.SetDock(regenBtn, Dock.Left);
+            actionBar.Children.Add(regenBtn);
+
+            outer.Children.Add(actionBar);
+        }
+
+        AiChatPanel.Children.Add(outer);
+        ScrollAiToEnd();
+    }
+
+    // 流式 Assistant 消息（仿 Cline）：顶部小字「正在思考…」，内容纯文本实时追加
+    private void BeginAiStreamBubble()
+    {
+        var outer = new StackPanel { Margin = new Thickness(0, 4, 0, 8) };
+
+        _aiStreamStatus = new TextBlock
+        {
+            Text = "ASSISTANT · 正在思考…",
+            FontSize = 10,
+            Foreground = new SolidColorBrush(IsDarkTheme
+                ? Color.FromRgb(0x9D, 0x9D, 0x9D)
+                : Color.FromRgb(0x78, 0x76, 0x70)),
+            Margin = new Thickness(0, 0, 0, 4)
+        };
+        outer.Children.Add(_aiStreamStatus);
+
+        _aiStreamTextBlock = new TextBlock
+        {
+            Text = "",
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = new SolidColorBrush(IsDarkTheme
+                ? Color.FromRgb(0xD4, 0xD4, 0xD4)
+                : Color.FromRgb(0x24, 0x23, 0x1F)),
+            FontSize = 12.5,
+            LineHeight = 18,
+            FontFamily = new FontFamily("Segoe UI, Segoe UI Emoji, Microsoft YaHei UI")
+        };
+        outer.Children.Add(_aiStreamTextBlock);
+
+        AiChatPanel.Children.Add(outer);
+        _aiStreamPlain = "";
+        ScrollAiToEnd();
+    }
+
+    // 流式完成：移除流式块，替换为静态 Assistant 消息
+    private void FinishAiStream(string finalText)
+    {
+        if (_aiStreamStatus != null)
+        {
+            var parent = _aiStreamStatus.Parent as StackPanel;
+            if (parent != null) AiChatPanel.Children.Remove(parent);
+        }
+        _aiStreamTextBlock = null;
+        _aiStreamStatus = null;
+
+        _lastAssistantText = finalText;
+        AddAssistantBubble(finalText, renderMarkdown: true);
+    }
+
+    // ===== AI 创建文件/文件夹能力 =====
+    // AI 通过以下结构化标记请求创建 Markdown 文章或文件夹：
+    // [CREATE_FILE path="posts/my-post.md"]
+    // ...文件内容（含 frontmatter）...
+    // [/END_FILE]
+    // [CREATE_DIR path="posts/2025"]  （可选，无需结束标记）
+    // 解析后自动写入 content 目录、刷新文件树并在对话中追加结果。
+    private void HandleAiCreateFileCommands(ref string aiText)
+    {
+        if (_projectPath == null) return;
+
+        var contentDir = Path.Combine(_projectPath, "content");
+        if (!Directory.Exists(contentDir))
+        {
+            AddAiBubble("assistant", _isEnglish
+                ? "Cannot create files: no content/ directory found in this project."
+                : "无法创建文件：当前项目没有 content/ 目录。");
+            return;
+        }
+
+        var created = new List<string>();
+        var errors = new List<string>();
+
+        var filePattern = @"\[CREATE_FILE path=""([^""]+)""\]([\s\S]*?)\[/END_FILE\]";
+        var fileMatches = Regex.Matches(aiText, filePattern);
+
+        foreach (Match m in fileMatches)
+        {
+            var relPath = m.Groups[1].Value.Trim();
+            var body = m.Groups[2].Value.Trim().TrimStart('\n');
+
+            if (string.IsNullOrWhiteSpace(relPath) || Path.IsPathRooted(relPath))
+            {
+                errors.Add(relPath);
+                continue;
+            }
+
+            // 强制 .md 扩展名
+            if (!relPath.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+                relPath += ".md";
+
+            // 防止路径穿越
+            var fullPath = Path.GetFullPath(Path.Combine(contentDir, relPath));
+            if (!fullPath.StartsWith(contentDir, StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add(relPath);
+                continue;
+            }
+
+            try
+            {
+                if (File.Exists(fullPath))
+                {
+                    errors.Add(relPath + (_isEnglish ? " (already exists)" : "（已存在）"));
+                    continue;
+                }
+                var dir = Path.GetDirectoryName(fullPath)!;
+                Directory.CreateDirectory(dir);
+                File.WriteAllText(fullPath, body, Encoding.UTF8);
+                created.Add(relPath);
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"{relPath}: {ex.Message}");
+            }
+        }
+
+        // 创建文件夹标记：[CREATE_DIR path="posts/2025"]
+        var dirPattern = @"\[CREATE_DIR path=""([^""]+)""\]";
+        var dirMatches = Regex.Matches(aiText, dirPattern);
+        foreach (Match m in dirMatches)
+        {
+            var relPath = m.Groups[1].Value.Trim();
+            if (string.IsNullOrWhiteSpace(relPath) || Path.IsPathRooted(relPath))
+            {
+                errors.Add(relPath);
+                continue;
+            }
+
+            var fullDir = Path.GetFullPath(Path.Combine(contentDir, relPath));
+            if (!fullDir.StartsWith(contentDir, StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add(relPath);
+                continue;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(fullDir);
+                created.Add(relPath + "/");
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"{relPath}: {ex.Message}");
+            }
+        }
+
+        if (created.Count > 0)
+        {
+            BuildFileTree();
+            Log(_isEnglish
+                ? $"AI created {created.Count} item(s)"
+                : $"AI 已创建 {created.Count} 个项目");
+        }
+
+        // 将创建结果追加到 AI 回复（移除标记）
+        aiText = Regex.Replace(aiText, filePattern, "").Trim();
+        aiText = Regex.Replace(aiText, dirPattern, "").Trim();
+
+        var sb = new StringBuilder();
+        if (created.Count > 0)
+        {
+            sb.AppendLine(_isEnglish
+                ? $"\n\n✅ 已创建："
+                : $"\n\n✅ 已创建：");
+            foreach (var c in created)
+                sb.AppendLine($"- `{c}`");
+        }
+        if (errors.Count > 0)
+        {
+            sb.AppendLine(_isEnglish
+                ? $"\n⚠️ 以下操作失败："
+                : $"\n⚠️ 以下操作失败：");
+            foreach (var err in errors)
+                sb.AppendLine($"- `{err}`");
+        }
+
+        // 若 AI 原始回复只有标记没有其他内容，则只显示结果
+        if (string.IsNullOrWhiteSpace(aiText))
+        {
+            aiText = sb.ToString().Trim();
+        }
+        else
+        {
+            aiText += sb.ToString();
+        }
+    }
+
+    // 清空对话
+    private void AiClearBtn_Click(object sender, RoutedEventArgs e)
+    {
+        if (_aiCts != null)
+        {
+            _aiCts.Cancel();
+            _aiCts = null;
+        }
+        AiChatPanel.Children.Clear();
+        _aiHistory.Clear();
+        _lastUserText = null;
+        _lastAssistantText = null;
+        AiStopBtn.Visibility = Visibility.Collapsed;
+        AiSendBtn.IsEnabled = true;
+        AiInputBox.IsEnabled = true;
+        AddAiBubble("assistant", _isEnglish
+            ? "Conversation cleared. How can I help you?"
+            : "对话已清空。有什么可以帮你的？");
+    }
+
+    // 复制回复
+    private void CopyAiReply(string text)
+    {
+        try
+        {
+            System.Windows.Clipboard.SetText(text);
+            Log(_isEnglish ? "AI reply copied." : "已复制 AI 回复。");
+        }
+        catch (Exception ex)
+        {
+            Log($"{( _isEnglish ? "Copy failed: " : "复制失败: ")}{ex.Message}");
+        }
+    }
+
+    // 插入回复到 Markdown 编辑器光标处
+    private void InsertAiReplyToEditor(string text)
+    {
+        if (_currentFile == null)
+        {
+            AddAiBubble("assistant", _isEnglish
+                ? "Please open a Markdown file first to insert the reply."
+                : "请先打开一个 Markdown 文件，才能插入回复。");
+            return;
+        }
+        var start = EditorBox.SelectionStart;
+        EditorBox.SelectedText = "\n" + text.Trim() + "\n";
+        EditorBox.Focus();
+        EditorBox.CaretIndex = start + text.Length + 2;
+        Log(_isEnglish ? "AI reply inserted into editor." : "已将 AI 回复插入编辑器。");
+    }
+
+    // 重新生成：重发最后一条用户消息
+    private async Task RegenerateAiReplyAsync()
+    {
+        if (string.IsNullOrEmpty(_lastUserText)) return;
+        // 移除最后一条 assistant 回复（静态气泡）
+        if (_lastAssistantText != null)
+        {
+            // Cline 风格：assistant 消息 = StackPanel[标注行(TextBlock ASSISTANT…) + 内容(FlowDocumentScrollViewer/TextBlock) + 操作栏(DockPanel)]
+            for (var i = AiChatPanel.Children.Count - 1; i >= 0; i--)
+            {
+                if (AiChatPanel.Children[i] is StackPanel sp &&
+                    sp.Children.Count >= 3 &&
+                    sp.Children[0] is TextBlock lbl &&
+                    lbl.Text.StartsWith("ASSISTANT ·") &&
+                    sp.Children[^1] is DockPanel)
+                {
+                    AiChatPanel.Children.RemoveAt(i);
+                    break;
+                }
+            }
+        }
+
+        if (_aiHistory.Count >= 1 && _aiHistory[^1].Role == "assistant")
+        {
+            _aiHistory.RemoveAt(_aiHistory.Count - 1);
+        }
+        _lastAssistantText = null;
+        await SendAiMessageAsync(_lastUserText!);
+    }
+
+    // ===== AI 面板自适应 =====
+    // 面板宽度变化时：重排已渲染消息（用户气泡宽度、助手 Markdown 页宽），
+    // 使窗口放大/缩小、拖拽 AI 分隔条时内容实时跟随
+    private int _debounceTick;
+    private void AiChatPanel_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        // 尺寸未变化则不处理
+        if (Math.Abs(e.NewSize.Width - e.PreviousSize.Width) < 1) return;
+
+        // 简单防抖：避免拖拽过程中高频重排导致卡顿（延迟 120ms 合并）
+        _debounceTick++;
+        var myTick = _debounceTick;
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,
+            new Action(() =>
+            {
+                if (myTick != _debounceTick) return; // 已有更新的尺寸事件，跳过
+                RelayoutAiMessages();
+            }));
+    }
+
+    // 重排 AI 消息
+    private void RelayoutAiMessages()
+    {
+        var panelWidth = Math.Max(160, AiChatPanel.ActualWidth);
+
+        foreach (var child in AiChatPanel.Children)
+        {
+            // 用户消息：Border[TextBlock]，限制最大宽度
+            if (child is Border userBorder &&
+                userBorder.Child is TextBlock userTb &&
+                userBorder.HorizontalAlignment == HorizontalAlignment.Right)
+            {
+                userBorder.MaxWidth = Math.Max(150, panelWidth - 60);
+                continue;
+            }
+
+            // 助手消息：StackPanel[标注行 + FlowDocumentScrollViewer/TextBlock + 操作栏(DockPanel)]
+            if (child is StackPanel sp && sp.Children.Count >= 2)
+            {
+                foreach (var item in sp.Children)
+                {
+                    // 更新 Markdown 渲染页宽 → FlowDocument 自动重排换行
+                    if (item is FlowDocumentScrollViewer fv && fv.Document != null)
+                    {
+                        fv.Document.PageWidth = Math.Max(120, panelWidth - 24);
+                        fv.Document.PagePadding = new Thickness(0);
+                    }
+                }
+            }
+        }
+    }
+
+    // 输入框高度自适应：内容增多时高度 40→120 增长，清空回到 40
+    private void AiInputBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        var tb = (TextBox)sender;
+        var lineCount = tb.Text.Count(c => c == '\n') + 1;
+        // 每行约 22px + 上下 padding 12px，夹在 48~120 之间
+        var desiredHeight = Math.Clamp(lineCount * 22 + 12, 48, 120);
+        if (Math.Abs(tb.Height - desiredHeight) > 2)
+        {
+            tb.Height = desiredHeight;
+        }
+    }
+
+    // 小型操作按钮
+    private static Button CreateActionButton(string icon, string tooltip)
+    {
+        return new Button
+        {
+            Content = icon,
+            ToolTip = tooltip,
+            Padding = new Thickness(4, 1, 4, 1),
+            FontSize = 10,
+            Margin = new Thickness(0, 0, 6, 0),
+            Cursor = System.Windows.Input.Cursors.Hand
+        };
+    }
+
+    private void ScrollAiToEnd()
+    {
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,
+            new Action(() => AiScroll.ScrollToEnd()));
+    }
+
+    private async void AiSendBtn_Click(object sender, RoutedEventArgs e)
+    {
+        var text = AiInputBox.Text.Trim();
+        if (string.IsNullOrEmpty(text)) return;
+        AiInputBox.Clear();
+        await SendAiMessageAsync(text);
+    }
+
+    private async void AiInputBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        // Enter 发送，Shift+Enter 换行
+        if (e.Key == Key.Enter && (Keyboard.Modifiers & ModifierKeys.Shift) == 0)
+        {
+            e.Handled = true;
+            var text = AiInputBox.Text.Trim();
+            if (string.IsNullOrEmpty(text)) return;
+            AiInputBox.Clear();
+            await SendAiMessageAsync(text);
+        }
+    }
+
+    private void AiStopBtn_Click(object sender, RoutedEventArgs e)
+    {
+        _aiCts?.Cancel();
+        _aiCts = null;
+        AiStopBtn.Visibility = Visibility.Collapsed;
+        AiSendBtn.IsEnabled = true;
+        AiInputBox.IsEnabled = true;
+        // 保留已流式输出的部分，转为静态以展示
+        if (_aiStreamTextBlock != null && _aiStreamStatus != null)
+        {
+            var partial = _aiStreamPlain ?? "";
+            FinishAiStream(partial + (_isEnglish ? "\n\n[stopped]" : "\n\n[已停止]"));
+        }
+    }
+
+    // 分析当前文件：将文件内容发送给 AI
+    private async void AiAnalyzeFileBtn_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentFile == null)
+        {
+            AddAiBubble("assistant", _isEnglish
+                ? "Please open a file first."
+                : "请先打开一个文件。");
+            return;
+        }
+        EnsureAiPanelExpanded();
+        var content = File.ReadAllText(_currentFile);
+        await SendAiMessageAsync(_isEnglish
+            ? $"Please analyze the following file (name: {Path.GetFileName(_currentFile)}) and provide a summary, frontmatter suggestions, and improvement advice:\n\n{Truncate(content, 8000)}"
+            : $"请分析以下文件（文件名：{Path.GetFileName(_currentFile)}），给出内容摘要、Frontmatter 建议和改进意见：\n\n{Truncate(content, 8000)}");
+    }
+
+    // 分析项目结构：将项目目录树发送给 AI
+    private async void AiAnalyzeProjectBtn_Click(object sender, RoutedEventArgs e)
+    {
+        if (_projectPath == null)
+        {
+            AddAiBubble("assistant", _isEnglish
+                ? "Please open a project first."
+                : "请先打开一个项目。");
+            return;
+        }
+        EnsureAiPanelExpanded();
+        var tree = GetProjectTreeContext();
+        await SendAiMessageAsync(_isEnglish
+            ? $"Here is the project structure (Hugo site). Please analyze it and suggest improvements, organization tips, or potential issues:\n\n{tree}"
+            : $"以下是 Hugo 项目的目录结构，请分析并给出改进建议、组织方式建议或潜在问题：\n\n{tree}");
+    }
+
+    // 若 AI 面板已折叠，先展开
+    private void EnsureAiPanelExpanded()
+    {
+        if (AiPanel.Visibility != Visibility.Visible)
+        {
+            AiExpandBtn_Click(this, new RoutedEventArgs());
+        }
+    }
+
+    private static string Truncate(string text, int max)
+    {
+        return text.Length <= max ? text : text[..max] + "\n...(truncated)";
+    }
+
+    // 生成项目树文本（供 AI 分析）
+    // 与左侧文件树（BuildFileTree）保持一致：只展示 content/static/assets 三个核心目录，
+    // 跳过 layouts/ 等渲染主题目录与后台生成目录，避免 AI 被无关结构干扰。
+    private string GetProjectTreeContext()
+    {
+        if (_projectPath == null) return "";
+        var sb = new StringBuilder();
+        sb.AppendLine(Path.GetFileName(_projectPath) + "/");
+
+        // 隐藏技术性/生成目录（与文件树一致）
+        var hiddenDirs = new HashSet<string> { "public", "resources", ".git", ".hugo_build.lock", "themes", "node_modules", "layouts" };
+
+        // 核心目录：仅 content、static、assets
+        var coreDirs = new[] { "content", "static", "assets" };
+
+        foreach (var dirName in coreDirs)
+        {
+            var dirPath = Path.Combine(_projectPath, dirName);
+            if (!Directory.Exists(dirPath)) continue;
+
+            sb.AppendLine("  " + dirName + "/");
+            AppendDirContext(sb, dirPath, "    ", hiddenDirs);
+        }
+        return sb.ToString();
+    }
+
+    // 递归追加目录结构（两级缩进，跳过隐藏目录）
+    private void AppendDirContext(StringBuilder sb, string dirPath, string indent, HashSet<string> hiddenDirs)
+    {
+        foreach (var dir in Directory.GetDirectories(dirPath).OrderBy(d => d))
+        {
+            var name = Path.GetFileName(dir);
+            if (hiddenDirs.Contains(name)) continue;
+            sb.AppendLine($"{indent}{name}/");
+            AppendDirContext(sb, dir, indent + "  ", hiddenDirs);
+        }
+
+        foreach (var file in Directory.GetFiles(dirPath).OrderBy(f => f))
+        {
+            var ext = Path.GetExtension(file).ToLower();
+            if (ext is ".md" or ".markdown" or ".yaml" or ".yml" or ".toml" or ".json"
+                or ".png" or ".jpg" or ".jpeg" or ".gif" or ".webp" or ".svg" or ".bmp" or ".ico")
+            {
+                sb.AppendLine($"{indent}{Path.GetFileName(file)}");
+            }
+        }
+    }
+
+    // 发送消息 + 流式接收回复（Cline 式：开始 → 思考中 → 逐字流式 → 完成转 Markdown）
+    private async Task SendAiMessageAsync(string userText)
+    {
+        if (string.IsNullOrWhiteSpace(_apiSettings.ApiKey))
+        {
+            AddAiBubble("assistant", _isEnglish
+                ? "Please configure the DeepSeek API key first (⚙ button in the AI panel)."
+                : "请先配置 DeepSeek API Key（AI 面板右上角 ⚙ 按钮）。");
+            return;
+        }
+
+        _lastUserText = userText;
+        AddAiBubble("user", userText);
+        _aiHistory.Add(new DeepSeekClient.ChatMessage { Role = "user", Content = userText });
+
+        // 控制 UI 状态
+        AiSendBtn.IsEnabled = false;
+        AiInputBox.IsEnabled = false;
+        AiStopBtn.Visibility = Visibility.Visible;
+        _aiCts = new CancellationTokenSource();
+
+        // 创建流式气泡（思考中状态）
+        BeginAiStreamBubble();
+        _aiStreamPlain = "";
+        string finalText;
+
+        try
+        {
+            var client = new DeepSeekClient(_apiSettings);
+
+            var msgs = new List<DeepSeekClient.ChatMessage>
+            {
+                new() { Role = "system", Content = BuildAiSystemPrompt() }
+            };
+            // 只保留最近 20 条上下文，避免 Token 膨胀
+            msgs.AddRange(_aiHistory.Skip(Math.Max(0, _aiHistory.Count - 20)));
+
+            await client.ChatStreamAsync(msgs, delta =>
+            {
+                _aiStreamPlain += delta;
+                if (_aiStreamTextBlock != null)
+                {
+                    _aiStreamTextBlock.Text = _aiStreamPlain;
+                }
+                ScrollAiToEnd();
+            }, _aiCts.Token);
+
+            finalText = _aiStreamPlain ?? "";
+        }
+        catch (OperationCanceledException)
+        {
+            finalText = (_aiStreamPlain ?? "") + (_isEnglish ? "\n\n[stopped]" : "\n\n[已停止]");
+        }
+        catch (Exception ex)
+        {
+            finalText = _isEnglish ? $"Request failed: {ex.Message}" : $"请求失败：{ex.Message}";
+        }
+
+        // 处理 AI 创建文件指令（在 AI 输入框内显示原文，但执行创建并追加结果）
+        var displayText = finalText;
+        if (_projectPath != null)
+        {
+            HandleAiCreateFileCommands(ref displayText);
+            finalText = displayText;
+        }
+
+        // 完成：转静态 Markdown 气泡
+        FinishAiStream(finalText);
+        _aiHistory.Add(new DeepSeekClient.ChatMessage
+        {
+            Role = "assistant",
+            Content = finalText
+        });
+
+        AiStopBtn.Visibility = Visibility.Collapsed;
+        AiSendBtn.IsEnabled = true;
+        AiInputBox.IsEnabled = true;
+        _aiCts?.Dispose();
+        _aiCts = null;
+        _aiStreamPlain = null;
+    }
+
+    // 系统提示词：让 AI 理解自己是 Hugo 内容助手
+    private string BuildAiSystemPrompt()
+    {
+        var currentFileContext = "";
+        if (_currentFile != null && !IsImageFile(_currentFile))
+        {
+            currentFileContext =
+                $"\n当前打开的文件：{_currentFile}\n文件内容（截断）：\n{Truncate(File.ReadAllText(_currentFile), 4000)}";
+        }
+
+        return "你是一个 Hugo 静态网站内容管理助手，运行在 Hugo - Markdown Client 桌面应用中。" +
+               "你的核心能力：\n" +
+               "1. 分析 Markdown 文章，给出总结、Frontmatter（title/date/draft/tags/categories 等）建议与写作改进意见。\n" +
+               "2. 理解 Hugo 项目结构（content/static/assets），帮助用户梳理组织方式、发现潜在问题。\n" +
+               "3. 将文章翻译为其他语言（保留 Markdown 格式与 frontmatter），用于多语言镜像维护。\n" +
+               "4. 回答关于 Hugo、Markdown、Frontmatter、多语言站点搭建等问题，给出可操作建议。\n" +
+               "\n=== 文件创建能力 ===\n" +
+               "当用户要求你写一篇新文章（如 posts/says/thoughts/note 等）时，你必须使用以下结构化标记：\n" +
+               "\\[CREATE_FILE path=\"posts/文件名.md\"\\]\n" +
+               "---\ntitle: \"文章标题\"\ndate: \"当前 UTC 时间\"\ntags: []\n---\n\n文章正文（完整 Markdown）\n" +
+               "\\[/END_FILE\\]\n" +
+               "当用户要求创建文件夹/分类目录时，使用：\\[CREATE_DIR path=\"posts/2025\"\\]\n" +
+               "path 是相对于 content/ 目录的相对路径（使用正斜杠），文件/文件夹会自动写入并出现在文件树中。" +
+               "请勿在对话中展示这些标记本身，直接输出文章内容即可。" +
+               "\n回复应使用与用户提问相同的语言。简洁、实用，必要时给出可直接复制的代码或 YAML 片段。" +
+               currentFileContext;
     }
 }
 
@@ -1382,7 +2428,12 @@ public class FrontmatterDialog : Window
     {
         Title = _isEnglish ? "Edit Frontmatter" : "编辑 Frontmatter";
         Width = 520;
+        MinWidth = 420;
+        MaxWidth = 800;
         Height = 400;
+        MinHeight = 300;
+        MaxHeight = 650;
+        ResizeMode = ResizeMode.CanResizeWithGrip;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         Background = _bgBrush;
         Foreground = _fgBrush;
