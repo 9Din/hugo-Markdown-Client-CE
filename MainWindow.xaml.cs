@@ -57,6 +57,18 @@ public partial class MainWindow : Window
             }
         };
 
+        // AI 面板默认折叠：必须与 AiCollapseBtn_Click 一致地清理列宽，
+        // 否则仅隐藏面板而列宽仍为 2*（MinWidth=220）会残留大片空白区域。
+        var splitterCol = RootGrid.ColumnDefinitions[3];
+        var aiCol = RootGrid.ColumnDefinitions[4];
+        aiCol.MinWidth = 0;
+        aiCol.MaxWidth = double.PositiveInfinity;
+        splitterCol.Width = new GridLength(0);
+        aiCol.Width = new GridLength(0);
+        AiSplitter.Visibility = Visibility.Collapsed;
+        AiPanel.Visibility = Visibility.Collapsed;
+        AiExpandBtn.Visibility = Visibility.Visible;
+
         // AI 面板尺寸变化 → 重排消息，使其跟随面板宽度自适应
         AiChatPanel.SizeChanged += AiChatPanel_SizeChanged;
 
