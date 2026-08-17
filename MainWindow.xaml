@@ -114,7 +114,7 @@
                         <Button x:Name="AiExpandBtn"
                                 Content="AI"
                                 Click="AiExpandBtn_Click"
-                                Visibility="Collapsed"
+                                Visibility="Visible"
                                 DockPanel.Dock="Right"
                                 Width="26" Height="26"
                                 Margin="0,5,8,3"
@@ -240,9 +240,11 @@
              1. Header：图标 + 标题（Cline） + 右侧操作（设置/新会话/历史）
              2. 消息区：User 右侧紧凑气泡；Assistant 全宽 Markdown 文本 + 顶部小字标注
              3. Footer：自适应输入框 + 快捷键提示行
+             默认折叠，点击编辑器右上角 AI 按钮展开
         -->
         <Border x:Name="AiPanel"
                 Grid.Column="4" Grid.Row="1" Grid.RowSpan="3"
+                Visibility="Collapsed"
                 MinWidth="220"
                 Background="{DynamicResource PanelBrush}"
                 BorderBrush="{DynamicResource BorderBrush}"
