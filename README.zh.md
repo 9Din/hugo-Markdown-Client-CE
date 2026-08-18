@@ -1,3 +1,7 @@
+<p align="center">
+<a href="README.md">English</a> · <a href="README.md">简体中文</a>
+</p>
+
 # Hugo - Markdown Client
 
 一个面向 Hugo 内容管理者的桌面应用，让非技术用户也能轻松编写、编辑、预览和发布 Hugo 网站内容。基于 **WPF + .NET 8** 开发，内置 AI 助手（DeepSeek），一站式写作流程。
