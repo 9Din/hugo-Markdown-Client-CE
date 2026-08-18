@@ -33,19 +33,31 @@ if errorlevel 1 (
 )
 
 echo [3/4] Publishing single-file exe...
-dotnet publish Huge.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
+REM EnableCompressionInSingleFile=true compresses the single-file exe (saves ~30-40MB)
+dotnet publish Huge.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -o publish
 if errorlevel 1 (
     echo [ERROR] Publish failed!
     pause
     exit /b 1
 )
 
-echo [4/4] Embedding Hugo executable...
-REM Call separate PowerShell script to handle Hugo embedding
-REM (avoids inline PowerShell escaping issues in cmd)
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0embed-hugo.ps1"
-if errorlevel 1 (
-    echo       [WARN] Hugo embedding failed, app will fall back to Hugo in system PATH.
+echo [4/4] Cleaning up...
+REM Remove PDB debug symbols (not needed for end users)
+if exist "publish\*.pdb" (
+    del /q "publish\*.pdb"
+    echo       Removed PDB debug symbols
+)
+
+echo [5/5] Embedding Hugo executable (optional)...
+REM Ask whether to embed hugo.exe (adds ~50MB, but no Hugo install needed on target machines)
+set /p embedHugo="Embed hugo.exe into publish folder? (Y/N, default N): "
+if /i "%embedHugo%"=="Y" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0embed-hugo.ps1"
+    if errorlevel 1 (
+        echo       [WARN] Hugo embedding failed, app will fall back to Hugo in system PATH.
+    )
+) else (
+    echo       Skipped Hugo embedding. Users can select hugo.exe manually when starting the server.
 )
 
 echo.

@@ -1,21 +1,32 @@
-# Build results
+# Build results & output
 bin/
 obj/
 publish/
+*.dll
+*.pdb
+*.cache
+*.exe
+*.zip
+*.tmp
+*.log
 
-# Visual Studio
-.vs/
-*.user
-*.suo
-
-# IDE
-.idea/
-*.swp
-
-# Hugo source bundles (upstream, not part of this project)
+# Hugo executable (downloaded/embedded by build.bat)
+hugo.exe
+hugo_download.zip
+vendor/hugo/hugo.exe
 hugo Source code*/
 hugo_source*/
 
-# Hugo executable cache (auto-downloaded by build.bat, not source)
-/hugo.exe
-/hugo_download.zip
+# IDE
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.csproj.user
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini

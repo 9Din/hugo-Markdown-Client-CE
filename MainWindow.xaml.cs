@@ -74,7 +74,7 @@ public partial class MainWindow : Window
 
         // AI 助手欢迎语（后续按语言切换）
         AddAiBubble("assistant",
-            "你好，我是 AI 助手。我可以分析当前文件、梳理项目结构、协助翻译镜像文章，或回答你的任何问题。请点击右上角 ⚙ 配置 DeepSeek API。");
+            "哈喽，我是AI小助手。可以分析当前文件、梳理项目结构等，回答您的任何问题。\n请点击右上角 ⚙ 配置 DeepSeek API。");
     }
 
     // 获取 Windows 系统当前是否为深色模式
@@ -262,7 +262,7 @@ public partial class MainWindow : Window
 
         foreach (var child in AiChatPanel.Children)
         {
-            // 助手消息：StackPanel[标注行(TextBlock) + 内容(FlowDocumentScrollViewer/TextBlock) + 操作栏]
+            // 助手消息：StackPanel[标注行(TextBlock) + 内容(RichTextBox/TextBox) + 操作栏]
             if (child is StackPanel sp)
             {
                 foreach (var item in sp.Children)
@@ -271,17 +271,17 @@ public partial class MainWindow : Window
                     {
                         label.Foreground = mutedBrush;
                     }
-                    else if (item is FlowDocumentScrollViewer fv && fv.Document != null)
+                    else if (item is RichTextBox rtb && rtb.Document != null)
                     {
-                        UpdateFlowDocumentColors(fv.Document, textBrush, mutedBrush);
+                        UpdateFlowDocumentColors(rtb.Document, textBrush, mutedBrush);
                     }
-                    else if (item is TextBlock contentTb)
+                    else if (item is TextBox contentBox)
                     {
-                        contentTb.Foreground = textBrush;
+                        contentBox.Foreground = textBrush;
                     }
                 }
             }
-            // 用户消息：Border[TextBlock] 白色文字不变
+            // 用户消息：StackPanel[Border + 复制按钮] 白色文字不变
         }
 
         // 刷新流式状态行/内容颜色
@@ -455,6 +455,11 @@ public partial class MainWindow : Window
     // 参考 Huge Genie：只显示 content、static、assets 三个核心目录，避免杂乱的目录干扰
     private void BuildFileTree()
     {
+        // 保存当前展开状态，重建后恢复，避免每次操作后文件树折叠
+        var expandedPaths = new HashSet<string>();
+        CollectExpandedPaths(FileTree.Items, expandedPaths);
+        var selectedPath = (FileTree.SelectedItem as TreeViewItem)?.Tag is FileNode selNode ? selNode.FullPath : null;
+
         FileTree.Items.Clear();
         if (_projectPath == null) return;
 
@@ -468,12 +473,12 @@ public partial class MainWindow : Window
         {
             Header = Path.GetFileName(_projectPath),
             Tag = new FileNode { FullPath = _projectPath, IsDirectory = true },
-            // 默认折叠文件树，用户点击后展开
-            IsExpanded = false
+            // 默认折叠文件树，用户点击后展开；若之前展开过则恢复
+            IsExpanded = expandedPaths.Contains(_projectPath)
         };
         FileTree.Items.Add(root);
 
-        // 只遍历这三个核心目录，且它们必须存在（全部默认折叠）
+        // 只遍历这三个核心目录，且它们必须存在
         foreach (var dirName in coreDirs)
         {
             var dirPath = Path.Combine(_projectPath, dirName);
@@ -483,14 +488,38 @@ public partial class MainWindow : Window
             {
                 Header = dirName,
                 Tag = new FileNode { FullPath = dirPath, IsDirectory = true },
-                IsExpanded = false
+                IsExpanded = expandedPaths.Contains(dirPath)
             };
             root.Items.Add(dirNode);
-            AddDirectory(dirNode, dirPath, hiddenDirs);
+            AddDirectory(dirNode, dirPath, hiddenDirs, expandedPaths);
+        }
+
+        // 恢复选中项
+        if (selectedPath != null)
+        {
+            var item = FindTreeItem(FileTree.Items, selectedPath);
+            if (item != null)
+            {
+                item.IsSelected = true;
+                item.BringIntoView();
+            }
         }
     }
 
-    private void AddDirectory(TreeViewItem parent, string dirPath, HashSet<string> hiddenDirs)
+    // 递归收集所有已展开的目录路径
+    private static void CollectExpandedPaths(ItemCollection items, HashSet<string> paths)
+    {
+        foreach (var obj in items)
+        {
+            if (obj is TreeViewItem item && item.Tag is FileNode node && node.IsDirectory)
+            {
+                if (item.IsExpanded) paths.Add(node.FullPath);
+                CollectExpandedPaths(item.Items, paths);
+            }
+        }
+    }
+
+    private void AddDirectory(TreeViewItem parent, string dirPath, HashSet<string> hiddenDirs, HashSet<string> expandedPaths)
     {
         foreach (var dir in Directory.GetDirectories(dirPath).OrderBy(d => d))
         {
@@ -501,10 +530,10 @@ public partial class MainWindow : Window
             {
                 Header = name,
                 Tag = new FileNode { FullPath = dir, IsDirectory = true },
-                IsExpanded = false
+                IsExpanded = expandedPaths.Contains(dir)
             };
             parent.Items.Add(node);
-            AddDirectory(node, dir, hiddenDirs);
+            AddDirectory(node, dir, hiddenDirs, expandedPaths);
         }
 
         foreach (var file in Directory.GetFiles(dirPath).OrderBy(f => f))
@@ -538,6 +567,18 @@ public partial class MainWindow : Window
             }
 
             OpenFile(node.FullPath);
+        }
+    }
+
+    // F2 重命名文件/文件夹（选中文件树节点后按 F2）
+    private void FileTree_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.F2 && FileTree.SelectedItem is TreeViewItem item && item.Tag is FileNode node)
+        {
+            e.Handled = true;
+            // TreeView.SelectedItem 是只读属性，F2 触发时 item 已经处于选中状态，
+            // 直接调用 RenameBtn_Click 即可（内部通过 GetSelectedPath() 获取当前选中项）
+            RenameBtn_Click(sender, e);
         }
     }
 
@@ -1066,9 +1107,20 @@ public partial class MainWindow : Window
     // 版本需支持常见主题（如 hugo-theme-stack 要求 Min 0.157.0 extended）
     private const string HugoVersion = "0.157.0";
 
-    // 获取 Hugo 可执行文件：优先应用同目录内嵌的 hugo，其次 PATH（实测存在）
+    // 获取 Hugo 可执行文件：优先用户指定路径，其次应用同目录内嵌的 hugo，最后 PATH
     private string? FindHugoExecutable()
     {
+        // 0. 用户手动指定的路径（在设置中保存）
+        if (!string.IsNullOrWhiteSpace(_apiSettings.HugoPath))
+        {
+            try
+            {
+                if (File.Exists(_apiSettings.HugoPath))
+                    return _apiSettings.HugoPath;
+            }
+            catch { /* 路径无效时忽略 */ }
+        }
+
         // 1. 应用所在目录下的 hugo.exe（build.bat 发布时会拷入 publish 目录）
         var appDir = AppDomain.CurrentDomain.BaseDirectory;
         var localHugo = Path.Combine(appDir, "hugo.exe");
@@ -1102,7 +1154,7 @@ public partial class MainWindow : Window
         return null;
     }
 
-    // 若 Hugo 不存在，自动下载 ~50MB 的 hugo.exe 到应用目录（无需用户安装/配置 PATH）
+    // 若 Hugo 不存在，让用户选择：手动指定路径 / 自动下载 / 取消
     private async Task<string?> EnsureHugoExecutableAsync()
     {
         var existing = FindHugoExecutable();
@@ -1111,22 +1163,54 @@ public partial class MainWindow : Window
         var appDir = AppDomain.CurrentDomain.BaseDirectory;
         var target = Path.Combine(appDir, "hugo.exe");
 
-        // 询问用户是否下载
-        var confirm = MessageBox.Show(
+        // 询问用户：手动选择 Hugo 路径 或 自动下载
+        var choice = MessageBox.Show(
             _isEnglish
                 ? "Hugo was not found on this computer.\n\n" +
-                  "Download Hugo (~50 MB) automatically to the app folder? " +
-                  "No installation or PATH setup needed."
+                  "Choose an option:\n" +
+                  "  Yes    → Select hugo.exe manually\n" +
+                  "  No     → Download Hugo (~50 MB) automatically\n" +
+                  "  Cancel → Skip"
                 : "未在本机找到 Hugo。\n\n" +
-                  "是否自动下载 Hugo（约 50 MB）到程序目录？无需安装、无需配置 PATH。",
+                  "请选择操作：\n" +
+                  "  是    → 手动选择 hugo.exe 路径\n" +
+                  "  否    → 自动下载 Hugo（约 50 MB）\n" +
+                  "  取消  → 跳过",
             _isEnglish ? "Hugo Not Found" : "未找到 Hugo",
-            MessageBoxButton.YesNo, MessageBoxImage.Question);
+            MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
 
-        if (confirm != MessageBoxResult.Yes)
+        // 用户选择"是" → 手动选择 hugo.exe 路径
+        if (choice == MessageBoxResult.Yes)
+        {
+            var dialog = new OpenFileDialog
+            {
+                Title = _isEnglish ? "Select hugo.exe" : "选择 hugo.exe",
+                Filter = "Hugo Executable (hugo.exe)|hugo.exe|Executable (*.exe)|*.exe|All files (*.*)|*.*",
+                CheckFileExists = true
+            };
+            if (dialog.ShowDialog() == true)
+            {
+                _apiSettings.HugoPath = dialog.FileName;
+                _apiSettings.Save();
+                Log(_isEnglish
+                    ? $"Hugo path saved: {dialog.FileName}"
+                    : $"Hugo 路径已保存：{dialog.FileName}");
+                return dialog.FileName;
+            }
+            Log(_isEnglish ? "Hugo selection cancelled by user." : "用户取消了 Hugo 路径选择。");
+            return null;
+        }
+
+        // 用户选择"否" → 自动下载
+        if (choice == MessageBoxResult.No)
+        {
+            // 继续执行下面的下载逻辑
+        }
+        else
         {
             Log(_isEnglish
-                ? "Hugo download cancelled by user."
-                : "用户取消了 Hugo 自动下载。");
+                ? "Hugo setup cancelled by user."
+                : "用户取消了 Hugo 设置。");
             return null;
         }
 
@@ -1618,8 +1702,15 @@ public partial class MainWindow : Window
     // 只把 Width 设 0 无法隐藏——正是“残留窗口”的根因，必须先清除该约束。
     private void AiCollapseBtn_Click(object sender, RoutedEventArgs e)
     {
-        var splitterCol = RootGrid.ColumnDefinitions[3];
+        // 折叠前保存当前面板宽度（像素），供下次展开时恢复
         var aiCol = RootGrid.ColumnDefinitions[4];
+        if (aiCol.ActualWidth > 0)
+        {
+            _apiSettings.AiPanelWidth = aiCol.ActualWidth;
+            _apiSettings.Save();
+        }
+
+        var splitterCol = RootGrid.ColumnDefinitions[3];
         // 清除列最小/最大约束，否则 MinWidth=220 留下 220px 空白区
         aiCol.MinWidth = 0;
         aiCol.MaxWidth = double.PositiveInfinity;
@@ -1634,10 +1725,20 @@ public partial class MainWindow : Window
     {
         var splitterCol = RootGrid.ColumnDefinitions[3];
         var aiCol = RootGrid.ColumnDefinitions[4];
-        // 恢复最小约束，并用 2* 比例宽度 → 随窗口缩放自适应
+        // 恢复最小约束
         aiCol.MinWidth = 220;
         splitterCol.Width = new GridLength(5);
-        aiCol.Width = new GridLength(2, GridUnitType.Star);
+
+        // 若保存过面板宽度，则恢复上次的宽度（像素）；否则用默认 2* 比例
+        if (_apiSettings.AiPanelWidth > 0)
+        {
+            aiCol.Width = new GridLength(_apiSettings.AiPanelWidth);
+        }
+        else
+        {
+            aiCol.Width = new GridLength(2, GridUnitType.Star);
+        }
+
         AiSplitter.Visibility = Visibility.Visible;
         AiPanel.Visibility = Visibility.Visible;
         AiExpandBtn.Visibility = Visibility.Collapsed;
@@ -1656,6 +1757,10 @@ public partial class MainWindow : Window
             var ratio = Math.Clamp(aiCol.ActualWidth / editorCol.ActualWidth, 0.15, 1.0);
             editorCol.Width = new GridLength(1, GridUnitType.Star);
             aiCol.Width = new GridLength(ratio, GridUnitType.Star);
+
+            // 保存当前宽度（像素），供折叠后恢复
+            _apiSettings.AiPanelWidth = aiCol.ActualWidth;
+            _apiSettings.Save();
         }
     }
 
@@ -1676,28 +1781,46 @@ public partial class MainWindow : Window
         }
     }
 
-    // User 消息：右侧紧凑气泡
+    // User 消息：右侧紧凑气泡 + 底部复制按钮（TextBlock 不可选中，需提供复制入口）
     private void AddUserBubble(string text)
     {
+        var outer = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 4, 0, 8)
+        };
+
         var bubble = new Border
         {
             CornerRadius = new CornerRadius(8, 8, 2, 8),
             Padding = new Thickness(10, 7, 10, 7),
             MaxWidth = Math.Max(150, AiChatPanel.ActualWidth - 60),
             HorizontalAlignment = HorizontalAlignment.Right,
-            Margin = new Thickness(0, 4, 0, 6),
             Background = new SolidColorBrush(Color.FromRgb(0xC5, 0x64, 0x73)),
-            Child = new TextBlock
+            Child = new TextBox
             {
                 Text = text,
                 TextWrapping = TextWrapping.Wrap,
+                IsReadOnly = true,
+                IsTabStop = false,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(0),
+                Background = Brushes.Transparent,
                 Foreground = Brushes.White,
                 FontSize = 12.5,
-                LineHeight = 18,
                 FontFamily = new FontFamily("Segoe UI, Segoe UI Emoji, Microsoft YaHei UI")
             }
         };
-        AiChatPanel.Children.Add(bubble);
+        outer.Children.Add(bubble);
+
+        // 复制按钮：用户消息也支持一键复制
+        var copyBtn = CreateActionButton("⧉ 复制", _isEnglish ? "Copy" : "复制");
+        copyBtn.HorizontalAlignment = HorizontalAlignment.Right;
+        copyBtn.Margin = new Thickness(0, 2, 0, 0);
+        copyBtn.Click += (s, e) => CopyAiReply(text);
+        outer.Children.Add(copyBtn);
+
+        AiChatPanel.Children.Add(outer);
         ScrollAiToEnd();
     }
 
@@ -1718,20 +1841,25 @@ public partial class MainWindow : Window
         };
         outer.Children.Add(label);
 
-        // 内容
+        // 内容：Markdown 渲染用只读 RichTextBox（支持文本选择/复制），纯文本用只读 TextBox
         if (renderMarkdown && !string.IsNullOrEmpty(text))
         {
-            var host = new FlowDocumentScrollViewer
+            var richBox = new RichTextBox
             {
                 Document = MarkdownRenderer.Render(text, Math.Max(180, AiChatPanel.ActualWidth)),
                 BorderThickness = new Thickness(0),
+                Padding = new Thickness(0),
+                Background = Brushes.Transparent,
+                IsReadOnly = true,
+                IsDocumentEnabled = true,
+                IsTabStop = false,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                IsToolBarVisible = false
+                FontFamily = new FontFamily("Segoe UI, Segoe UI Emoji, Microsoft YaHei UI")
             };
-            // FlowDocumentScrollViewer 即使禁用滚动条也会拦截鼠标滚轮，
+            // RichTextBox 即使禁用滚动条也会拦截鼠标滚轮，
             // 导致悬停其上时外层 AiScroll 无法滚动。这里把滚轮事件转发给 AiScroll。
-            host.PreviewMouseWheel += (s, e) =>
+            richBox.PreviewMouseWheel += (s, e) =>
             {
                 var scroll = AiScroll;
                 if (scroll == null) return;
@@ -1740,19 +1868,24 @@ public partial class MainWindow : Window
                 else scroll.ScrollToVerticalOffset(scroll.VerticalOffset - 40);
                 e.Handled = true;
             };
-            outer.Children.Add(host);
+            outer.Children.Add(richBox);
         }
         else
         {
-            outer.Children.Add(new TextBlock
+            // 只读 TextBox 支持文本选择/复制
+            outer.Children.Add(new TextBox
             {
                 Text = text,
                 TextWrapping = TextWrapping.Wrap,
+                IsReadOnly = true,
+                IsTabStop = false,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(0),
+                Background = Brushes.Transparent,
                 Foreground = new SolidColorBrush(IsDarkTheme
                     ? Color.FromRgb(0xD4, 0xD4, 0xD4)
                     : Color.FromRgb(0x24, 0x23, 0x1F)),
                 FontSize = 12.5,
-                LineHeight = 18,
                 FontFamily = new FontFamily("Segoe UI, Segoe UI Emoji, Microsoft YaHei UI")
             });
         }
@@ -2083,26 +2216,25 @@ public partial class MainWindow : Window
 
         foreach (var child in AiChatPanel.Children)
         {
-            // 用户消息：Border[TextBlock]，限制最大宽度
-            if (child is Border userBorder &&
-                userBorder.Child is TextBlock userTb &&
+            if (child is not StackPanel sp) continue;
+            if (sp.Children.Count == 0) continue;
+
+            // 用户消息：StackPanel[Border + 复制按钮]，限制气泡最大宽度
+            if (sp.Children[0] is Border userBorder &&
                 userBorder.HorizontalAlignment == HorizontalAlignment.Right)
             {
                 userBorder.MaxWidth = Math.Max(150, panelWidth - 60);
                 continue;
             }
 
-            // 助手消息：StackPanel[标注行 + FlowDocumentScrollViewer/TextBlock + 操作栏(DockPanel)]
-            if (child is StackPanel sp && sp.Children.Count >= 2)
+            // 助手消息：StackPanel[标注行 + RichTextBox/TextBox + 操作栏(DockPanel)]
+            foreach (var item in sp.Children)
             {
-                foreach (var item in sp.Children)
+                // 更新 Markdown 渲染页宽 → FlowDocument 自动重排换行
+                if (item is RichTextBox rtb && rtb.Document != null)
                 {
-                    // 更新 Markdown 渲染页宽 → FlowDocument 自动重排换行
-                    if (item is FlowDocumentScrollViewer fv && fv.Document != null)
-                    {
-                        fv.Document.PageWidth = Math.Max(120, panelWidth - 24);
-                        fv.Document.PagePadding = new Thickness(0);
-                    }
+                    rtb.Document.PageWidth = Math.Max(120, panelWidth - 24);
+                    rtb.Document.PagePadding = new Thickness(0);
                 }
             }
         }

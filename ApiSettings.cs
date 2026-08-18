@@ -12,6 +12,17 @@ public class ApiSettings
     public string BaseUrl { get; set; } = "https://api.deepseek.com";
     public string ApiKey { get; set; } = "";
     public string Model { get; set; } = "deepseek-chat";
+    /// <summary>
+    /// 用户手动指定的 hugo.exe 路径（可选）。
+    /// 若为空，则按原有顺序查找：应用目录 → bin → vendor → PATH。
+    /// </summary>
+    public string HugoPath { get; set; } = "";
+
+    /// <summary>
+    /// AI 面板宽度（像素）。折叠后再次展开时恢复上次的宽度。
+    /// 0 表示使用默认宽度（2* 比例）。
+    /// </summary>
+    public double AiPanelWidth { get; set; } = 0;
 
     private static string SettingsPath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Huge", "settings.json");

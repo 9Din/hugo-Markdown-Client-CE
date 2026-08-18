@@ -8,10 +8,12 @@ A desktop application for Hugo content management, enabling non-technical users 
 - Chat with a **built-in AI assistant** (DeepSeek Chat Completions, OpenAI-compatible API)
 - **Streaming output** with Cline-style bubbles (user right-aligned, assistant full-width Markdown)
 - Supports **Markdown rendering** (headings / lists / tables / code blocks / links) and **emoji**
+- **All messages are copyable** — select text with the mouse, or click the "⧉ Copy" button
 - Buttons to **analyze the current file** or **analyze the project structure** (content/static/assets only)
 - **AI can create Markdown articles and folders** directly into `content/` — just ask "write a post about ..." and the file appears in the tree
 - Configure API key/base URL/model via the **API Settings** dialog (⚙ in the AI panel)
 - AI panel **collapses by default** — click the **AI** button at the top-right of the editor to expand
+- **Panel width memory** — drag to resize, saved automatically; restores after collapse/expand
 
 ### 📁 Hugo Project Navigation
 - Open a Hugo project folder and browse content in a tree view
@@ -32,9 +34,12 @@ A desktop application for Hugo content management, enabling non-technical users 
 ### 🚀 Hugo Command Control
 - One-click start / stop `hugo server` with real-time logs
 - Starting the server automatically opens the live site in your default browser (localhost:1313)
-- **Hugo embedded**: `build.bat` automatically downloads **Hugo 0.157.0 extended** (windows-amd64) and places `hugo.exe` in the publish folder — no separate Hugo installation or PATH configuration needed on any computer
-- **Portable fallback**: if `hugo.exe` is placed in the same folder as the application (or in `vendor/hugo/hugo.exe`), it is used automatically
-- **Auto-download on first use**: if Hugo is not found on the target computer, the app asks the user and downloads `hugo.exe` (~50 MB) automatically to the app folder — with **real-time download progress** (percentage / MB)
+- **Flexible Hugo discovery** (in priority order):
+  1. **User-selected path** — when Hugo is not found, the app asks the user to select `hugo.exe` manually (saved for future use)
+  2. **Embedded Hugo** — `build.bat` can optionally embed `hugo.exe` in the publish folder (no separate installation needed)
+  3. **Portable fallback** — `hugo.exe` next to the app, or in `vendor/hugo/hugo.exe`
+  4. **System PATH** — if Hugo is already installed
+- **Auto-download on first use**: if Hugo is not found and the user chooses to download, the app downloads `hugo.exe` (~50 MB) automatically with **real-time download progress** (percentage / MB)
 - Git commit & push (add → commit → push)
 
 ### 📂 Folder Templates
@@ -93,13 +98,17 @@ A desktop application for Hugo content management, enabling non-technical users 
 
 ## 🔨 Build & Package
 
-Run `build.bat` to automatically build, publish as a single-file exe, and download/embed the latest Hugo:
+Run `build.bat` to automatically build and publish as a single-file exe:
 
 ```bat
 build.bat
 ```
 
-Output is located at `publish\Huge.exe` (self-contained, no .NET installation required), with `publish\hugo.exe` embedded alongside it. Copy the entire `publish` folder to any Windows computer and everything works out of the box.
+During the build, you'll be asked whether to embed `hugo.exe` into the publish folder:
+- **Y** → embeds Hugo (~50 MB extra, zero-dependency for users)
+- **N** (default) → smaller exe; users can select `hugo.exe` manually when starting the server, or the app will auto-download it on first use
+
+Output is located at `publish\Huge.exe` (self-contained, no .NET installation required). Copy the entire `publish` folder to any Windows computer and everything works out of the box.
 
 ## 📁 Project Structure
 

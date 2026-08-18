@@ -85,7 +85,7 @@
                                 DockPanel.Dock="Right" Padding="5,2" Margin="0,4,8,4"
                                 FontSize="11" ToolTip="刷新文件树 / Refresh File Tree" ToolTipService.ShowOnDisabled="True"/>
                     </DockPanel>
-                    <TreeView x:Name="FileTree" SelectedItemChanged="FileTree_SelectedItemChanged" Margin="0,0,0,0">
+                    <TreeView x:Name="FileTree" SelectedItemChanged="FileTree_SelectedItemChanged" KeyDown="FileTree_KeyDown" Margin="0,0,0,0">
                         <TreeView.ContextMenu>
                             <ContextMenu>
                                 <MenuItem x:Name="CtxNewFile" Header="新建文件" Click="CtxNewFile_Click"/>
@@ -165,8 +165,9 @@
                             <TextBox x:Name="EditorBox"
                                      AcceptsReturn="True"
                                      AcceptsTab="True"
+                                     TextWrapping="Wrap"
                                      VerticalScrollBarVisibility="Auto"
-                                     HorizontalScrollBarVisibility="Auto"
+                                     HorizontalScrollBarVisibility="Disabled"
                                      FontFamily="Consolas"
                                      FontSize="13"
                                      TextChanged="EditorBox_TextChanged"
