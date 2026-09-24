@@ -35,7 +35,7 @@ A desktop application for Hugo content management, enabling non-technical users 
 - **Friendly Frontmatter editor** — edit metadata fields via a form (instead of raw YAML), with automatic YAML generation
 - **Light and dark themes** inspired by VS Code color schemes, applied globally (including dialogs), defaults to system dark/light mode
 
-### 🚀 Hugo Command Control
+###  Hugo Command Control
 - One-click start / stop `hugo server` with real-time logs
 - Starting the server automatically opens the live site in your default browser (localhost:1313)
 - **Flexible Hugo discovery** (in priority order):
